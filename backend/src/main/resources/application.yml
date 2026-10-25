@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: enterprise-rag-assistant
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/enterprise_rag}
+    username: ${DATABASE_USERNAME:enterprise_rag}
+    password: ${DATABASE_PASSWORD:enterprise_rag}
+  flyway:
+    enabled: true
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+  ai:
+    model:
+      chat: ${CHAT_MODEL_PROVIDER:deepseek}
+      embedding: ollama
+    deepseek:
+      api-key: ${DEEPSEEK_API_KEY:}
+      chat:
+        model: ${DEEPSEEK_MODEL:deepseek-chat}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      embedding:
+        model: ${EMBEDDING_MODEL:nomic-embed-text}
+        truncate: false
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: strict
+
+app:
+  traces:
+    retention-days: ${TRACE_RETENTION_DAYS:30}
+    cleanup-cron: ${TRACE_CLEANUP_CRON:0 17 3 * * *}
+  demo:
+    authentication-enabled: ${DEMO_AUTHENTICATION_ENABLED:true}
+  retrieval:
+    candidate-depth: 10
+    fused-depth: 8
+    rrf-constant: 60
+    minimum-evidence-count: 1
+    max-context-characters: 12000
+  ingestion:
+    max-file-bytes: 10485760
+    chunk-size: 1800
+    chunk-overlap: 240
+    embedding-model-id: ${EMBEDDING_MODEL:nomic-embed-text}
+    embedding-dimensions: 768
+  seed:
+    enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

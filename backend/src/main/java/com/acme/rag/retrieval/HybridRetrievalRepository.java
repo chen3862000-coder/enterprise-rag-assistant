@@ -35,7 +35,7 @@ public class HybridRetrievalRepository {
                 .param("embedding", vector).param("roles", roles).param("depth", depth)
                 .query((rs, row) -> candidate(rs.getString("id"), rs.getObject("version_id", UUID.class),
                         rs.getString("document_id"), rs.getString("title"), rs.getInt("version_number"),
-                        rs.getString("heading_path"), rs.getString("chunk_text"), 1.0 - rs.getDouble("distance")))
+                        rs.getString("heading_path"), rs.getString("chunk_text"), 1.0 - rs.getDouble("distance"), true, false, false))
                 .list();
     }
 
@@ -49,7 +49,7 @@ public class HybridRetrievalRepository {
                 .param("query", query).param("roles", roles).param("depth", depth)
                 .query((rs, row) -> candidate(rs.getString("id"), rs.getObject("version_id", UUID.class),
                         rs.getString("document_id"), rs.getString("title"), rs.getInt("version_number"),
-                        rs.getString("heading_path"), rs.getString("chunk_text"), rs.getDouble("rank")))
+                        rs.getString("heading_path"), rs.getString("chunk_text"), rs.getDouble("rank"), false, true, false))
                 .list();
     }
 
@@ -62,13 +62,15 @@ public class HybridRetrievalRepository {
                 .param("identifier", identifier).param("roles", roles).param("depth", depth)
                 .query((rs, row) -> candidate(rs.getString("id"), rs.getObject("version_id", UUID.class),
                         rs.getString("document_id"), rs.getString("title"), rs.getInt("version_number"),
-                        rs.getString("heading_path"), rs.getString("chunk_text"), rs.getDouble("rank")))
+                        rs.getString("heading_path"), rs.getString("chunk_text"), rs.getDouble("rank"), false, false, true))
                 .list();
     }
 
     private static RetrievalCandidate candidate(String chunkId, UUID versionId, String documentId, String title,
-                                                int version, String section, String text, double score) {
-        return new RetrievalCandidate(chunkId, versionId, documentId, title, version, section, text, score, 0, 0, 0);
+                                                int version, String section, String text, double score,
+                                                boolean vectorMatch, boolean keywordMatch, boolean exactMatch) {
+        return new RetrievalCandidate(chunkId, versionId, documentId, title, version, section, text, score,
+                vectorMatch, keywordMatch, exactMatch);
     }
 
     private static String vectorLiteral(float[] embedding) {

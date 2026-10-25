@@ -26,8 +26,8 @@ public final class CitationAccessValidator {
                 .filter(citation -> allowedChunks.contains(citation.chunkId())).toList();
         if (citations.isEmpty() || citations.size() != answer.citations().size()) {
             return new CitationResponseBuilder.ValidatedAnswer(
-                    "I could not verify this answer with currently authorized source evidence.", citations, "INSUFFICIENT_EVIDENCE");
+                    "I could not find sufficient currently authorized source evidence to answer that question.", citations, "INSUFFICIENT_EVIDENCE");
         }
-        return new CitationResponseBuilder.ValidatedAnswer(answer.answer(), citations, "SUPPORTED");
+        return new CitationResponseBuilder.ValidatedAnswer(answer.answer(), citations, answer.groundingStatus());
     }
 }

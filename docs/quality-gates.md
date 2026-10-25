@@ -16,4 +16,4 @@ The supported local quality command is `cd backend && ./mvnw verify` using Java 
 
 ## Current Baseline
 
-The harness was executed on Java 21 with Docker available. `./mvnw clean verify` passed, including the PostgreSQL/pgvector Testcontainers tests, PMD, SpotBugs, ArchUnit, and the JaCoCo class/method minimums. The build uses deterministic fake embeddings and requires no paid model credentials.
+Re-run `./mvnw clean verify` under Java 21 for the current worktree; results from earlier revisions are historical. The build uses deterministic fake embeddings and requires no paid model credentials.

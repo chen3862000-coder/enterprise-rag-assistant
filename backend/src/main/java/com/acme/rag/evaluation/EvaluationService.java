@@ -19,6 +19,8 @@ public class EvaluationService {
     private final int candidateDepth;
     private final int fusedDepth;
     private final int rrfConstant;
+    private final double minimumVectorSimilarity;
+    private final double minimumKeywordScore;
     private final String embeddingModelId;
 
     public EvaluationService(
@@ -30,6 +32,8 @@ public class EvaluationService {
             @Value("${app.retrieval.candidate-depth:10}") int candidateDepth,
             @Value("${app.retrieval.fused-depth:8}") int fusedDepth,
             @Value("${app.retrieval.rrf-constant:60}") int rrfConstant,
+            @Value("${app.retrieval.minimum-vector-similarity:0.35}") double minimumVectorSimilarity,
+            @Value("${app.retrieval.minimum-keyword-score:0.0005}") double minimumKeywordScore,
             @Value("${app.ingestion.embedding-model-id:nomic-embed-text}") String embeddingModelId) {
         this.datasetLoader = datasetLoader;
         this.evaluator = evaluator;
@@ -39,6 +43,8 @@ public class EvaluationService {
         this.candidateDepth = candidateDepth;
         this.fusedDepth = fusedDepth;
         this.rrfConstant = rrfConstant;
+        this.minimumVectorSimilarity = minimumVectorSimilarity;
+        this.minimumKeywordScore = minimumKeywordScore;
         this.embeddingModelId = embeddingModelId;
     }
 
@@ -52,9 +58,10 @@ public class EvaluationService {
         List<EvaluationScenarioResult> results = List.copyOf(evaluated);
         Instant completed = Instant.now();
         EvaluationMetrics calculatedMetrics = metricsCalculator.calculate(results);
+        Map<String, Object> config = retrievalConfiguration();
         EvaluationRunResult result = new EvaluationRunResult(UUID.randomUUID(), dataset.version(), "OFFLINE_RETRIEVAL",
-                embeddingModelId, results.size(), calculatedMetrics, "SUCCEEDED", started, completed, results);
-        runs.save(result, requestedBy, retrievalConfiguration());
+                embeddingModelId, config, results.size(), calculatedMetrics, "SUCCEEDED", started, completed, results);
+        runs.save(result, requestedBy, config);
         metrics.evaluationRun();
         return result;
     }
@@ -72,6 +79,8 @@ public class EvaluationService {
         configuration.put("candidateDepth", candidateDepth);
         configuration.put("fusedDepth", fusedDepth);
         configuration.put("rrfConstant", rrfConstant);
+        configuration.put("minimumVectorSimilarity", minimumVectorSimilarity);
+        configuration.put("minimumKeywordScore", minimumKeywordScore);
         return Map.copyOf(configuration);
     }
 }

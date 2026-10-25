@@ -28,6 +28,10 @@ public class AnswerGenerator {
         this.models = models;
     }
 
+    public String providerName() {
+        return models.getIfAvailable() == null ? "none" : "deepseek";
+    }
+
     public String generate(String question, AssembledContext context) {
         if (context.evidence().isEmpty()) {
             return ABSTENTION;

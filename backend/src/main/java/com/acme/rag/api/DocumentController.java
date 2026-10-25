@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 @RestController
 @RequestMapping("/api/documents")
@@ -32,6 +33,7 @@ public class DocumentController {
     private final DocumentManagementRepository documents;
     private final CurrentIdentity identity;
 
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Controller stores private Spring service collaborators and does not expose them")
     public DocumentController(DocumentIngestionService ingestion, DocumentManagementRepository documents, CurrentIdentity identity) {
         this.ingestion = ingestion;
         this.documents = documents;
@@ -85,10 +87,19 @@ public class DocumentController {
         return documents.versions(documentId, identity.allowedRoles());
     }
 
-    @DeleteMapping("/{documentId}")
+    @PostMapping("/{documentId}/disable")
     public ResponseEntity<Void> disable(@PathVariable String documentId) {
         identity.requireDocumentAdmin();
         if (!documents.disable(documentId)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/{documentId}")
+    public ResponseEntity<Void> delete(@PathVariable String documentId) {
+        identity.requireDocumentAdmin();
+        if (!documents.delete(documentId)) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.noContent().build();

@@ -34,7 +34,7 @@ describe('ChatWorkspace', () => {
       answer: 'The default limit is 1,000 requests per minute [S1].',
       citations: [{ citationId: 'S1', documentId: 'doc-rate-limit', documentTitle: 'Enterprise API Policy', version: 2, chunkId: 'doc-rate-limit-v2-c0', section: 'Rate Limits' }],
       traceId: 'trace-2',
-      groundingStatus: 'SUPPORTED',
+      groundingStatus: 'CITATIONS_PRESENT',
     })
     render(<ChatWorkspace />)
     fireEvent.click(screen.getByText('What is the Enterprise API rate limit, and how should clients handle HTTP 429?'))

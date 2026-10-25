@@ -59,16 +59,26 @@ class DocumentVersionRepository {
                   List<DocumentChunk> chunks, List<float[]> vectors) {
         transactions.executeWithoutResult(status -> {
             lockDocument(documentId);
+            updateMetadata(documentId, reservation.metadata());
             persistChunks(documentId, reservation, chunks, vectors);
             jdbc.update("UPDATE document_versions SET index_status = 'SUPERSEDED' WHERE document_id = ? AND index_status = 'ACTIVE'", documentId);
             jdbc.update("UPDATE document_versions SET index_status = 'ACTIVE' WHERE id = ? AND index_status = 'INDEXING'", reservation.versionId());
             jdbc.update("UPDATE documents SET current_version_id = ?, status = 'ACTIVE', updated_at = now() WHERE id = ?",
                     reservation.versionId(), documentId);
-            jdbc.update("DELETE FROM document_permissions WHERE document_id = ?", documentId);
-            roles.forEach(role -> jdbc.update(
-                    "INSERT INTO document_permissions (document_id, allowed_role) VALUES (?, ?)", documentId, role));
+            replacePermissions(documentId, roles);
             jdbc.update("UPDATE ingestion_jobs SET status = 'SUCCEEDED', completed_at = now() WHERE id = ?", reservation.jobId());
         });
+    }
+
+    private void replacePermissions(String documentId, Set<String> roles) {
+        jdbc.update("DELETE FROM document_permissions WHERE document_id = ?", documentId);
+        roles.forEach(role -> jdbc.update(
+                "INSERT INTO document_permissions (document_id, allowed_role) VALUES (?, ?)", documentId, role));
+    }
+
+    private void updateMetadata(String documentId, DocumentMetadata metadata) {
+        jdbc.update("UPDATE documents SET title = ?, department = ?, classification = ?, updated_at = now() WHERE id = ?",
+                metadata.title(), metadata.department(), metadata.classification(), documentId);
     }
 
     void fail(String documentId, VersionReservation reservation, RuntimeException failure) {
@@ -91,7 +101,7 @@ class DocumentVersionRepository {
         }
         Optional<ExistingVersion> existing = findReusableVersion(upload.documentId(), contentHash);
         if (existing.isPresent()) {
-            return reuseOrRetry(existing.get(), upload.documentId(), jobId);
+            return reuseOrRetry(existing.get(), upload, jobId);
         }
         return createVersion(upload, contentHash, versionId, jobId);
     }
@@ -118,17 +128,34 @@ class DocumentVersionRepository {
                         rs.getString("index_status"))).optional();
     }
 
-    private VersionReservation reuseOrRetry(ExistingVersion existing, String documentId, UUID newJobId) {
+    private VersionReservation reuseOrRetry(ExistingVersion existing, ValidatedUpload upload, UUID newJobId) {
         if (STATUS_INDEXING.equals(existing.status())) {
             throw new IngestionException("An identical document version is already being indexed");
         }
         if (STATUS_FAILED.equals(existing.status())) {
             jdbc.update("UPDATE document_versions SET index_status = 'INDEXING' WHERE id = ?", existing.versionId());
             jdbc.update("INSERT INTO ingestion_jobs (id, document_id, document_version_id, status) VALUES (?, ?, ?, 'INDEXING')",
-                    newJobId, documentId, existing.versionId());
-            return new VersionReservation(existing.versionId(), existing.version(), newJobId, false);
+                    newJobId, upload.documentId(), existing.versionId());
+            return new VersionReservation(existing.versionId(), existing.version(), newJobId, false, false, metadata(upload));
         }
-        return new VersionReservation(existing.versionId(), existing.version(), null, true);
+        boolean changed = applyMetadataAndPermissions(upload);
+        return new VersionReservation(existing.versionId(), existing.version(), null, true, changed, metadata(upload));
+    }
+
+    private boolean applyMetadataAndPermissions(ValidatedUpload upload) {
+        DocumentMetadata previous = client.sql("SELECT title, department, classification FROM documents WHERE id = :id")
+                .param("id", upload.documentId()).query((rs, row) -> new DocumentMetadata(
+                        rs.getString("title"), rs.getString("department"), rs.getString("classification"))).single();
+        Set<String> previousRoles = Set.copyOf(client.sql("SELECT allowed_role FROM document_permissions WHERE document_id = :id")
+                .param("id", upload.documentId()).query(String.class).list());
+        DocumentMetadata next = metadata(upload);
+        boolean changed = !previous.equals(next) || !previousRoles.equals(upload.roles());
+        jdbc.update("""
+                UPDATE documents SET title = ?, department = ?, classification = ?, status = 'ACTIVE', updated_at = now()
+                WHERE id = ?
+                """, upload.title(), upload.department(), upload.classification(), upload.documentId());
+        replacePermissions(upload.documentId(), upload.roles());
+        return changed;
     }
 
     private VersionReservation createVersion(ValidatedUpload upload, String contentHash, UUID versionId, UUID jobId) {
@@ -142,9 +169,11 @@ class DocumentVersionRepository {
                 Timestamp.from(upload.effectiveAt()), modelId, dimensions);
         jdbc.update("INSERT INTO ingestion_jobs (id, document_id, document_version_id, status) VALUES (?, ?, ?, 'INDEXING')",
                 jobId, upload.documentId(), versionId);
-        jdbc.update("UPDATE documents SET title = ?, department = ?, classification = ?, updated_at = now() WHERE id = ?",
-                upload.title(), upload.department(), upload.classification(), upload.documentId());
-        return new VersionReservation(versionId, nextVersion, jobId, false);
+        return new VersionReservation(versionId, nextVersion, jobId, false, false, metadata(upload));
+    }
+
+    private static DocumentMetadata metadata(ValidatedUpload upload) {
+        return new DocumentMetadata(upload.title(), upload.department(), upload.classification());
     }
 
     private void persistChunks(String documentId, VersionReservation reservation,

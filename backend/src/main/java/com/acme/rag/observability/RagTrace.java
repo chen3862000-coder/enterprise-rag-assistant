@@ -14,6 +14,8 @@ public record RagTrace(
         int exactCandidateCount,
         int contextChunkCount,
         int citationCount,
+        boolean evidenceSufficient,
+        String evidenceGateReason,
         String modelProvider,
         String modelId,
         String groundingStatus,

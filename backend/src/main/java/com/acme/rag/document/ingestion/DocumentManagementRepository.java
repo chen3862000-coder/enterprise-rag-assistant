@@ -72,6 +72,11 @@ public class DocumentManagementRepository {
     }
 
     public boolean disable(String documentId) {
-        return updates.update("UPDATE documents SET status = 'DISABLED', updated_at = now() WHERE id = ? AND status <> 'DELETED'", documentId) == 1;
+        return updates.update("UPDATE documents SET status = 'DISABLED', updated_at = now() WHERE id = ? AND status = 'ACTIVE'", documentId) == 1;
+    }
+
+    public boolean delete(String documentId) {
+        return updates.update("UPDATE documents SET status = 'DELETED', updated_at = now() WHERE id = ? AND status <> 'DELETED'",
+                documentId) == 1;
     }
 }

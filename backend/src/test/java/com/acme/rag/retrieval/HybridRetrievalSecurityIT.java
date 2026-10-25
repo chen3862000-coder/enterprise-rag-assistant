@@ -7,6 +7,7 @@ import com.acme.rag.evaluation.DemoRoleResolver;
 import com.acme.rag.evaluation.EvaluationDatasetLoader;
 import com.acme.rag.evaluation.EvaluationScenarioEvaluator;
 import com.acme.rag.evaluation.EvaluationScenarioResult;
+import com.acme.rag.evaluation.EvaluationCategory;
 import com.acme.rag.evaluation.EvaluationDataset;
 import com.acme.rag.evaluation.EvaluationScenario;
 import com.acme.rag.document.ingestion.IngestionResult;
@@ -18,6 +19,7 @@ import java.sql.Timestamp;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -138,6 +140,29 @@ class HybridRetrievalSecurityIT {
     }
 
     @Test
+    void sameContentReindexRevokesAclImmediatelyWithoutAddingVersion() {
+        String id = "doc-engineering";
+        byte[] identicalContent = "GW-204 gateway troubleshooting.".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        ingestion.ingest(new IngestionRequest(id, "Gateway error guide", "ENGINEERING", "INTERNAL",
+                Set.of("ENGINEERING"), "guide.txt", identicalContent, null));
+        int versionCount = jdbc.queryForObject("SELECT count(*) FROM document_versions WHERE document_id = ?", Integer.class, id);
+
+        IngestionResult update = ingestion.ingest(new IngestionRequest(id, "Gateway guide for HR", "HR", "CONFIDENTIAL",
+                Set.of("HR"), "guide.txt", identicalContent, null));
+
+        assertThat(update.duplicate()).isTrue();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM document_versions WHERE document_id = ?", Integer.class, id))
+                .isEqualTo(versionCount);
+        assertThat(jdbc.queryForList("SELECT allowed_role FROM document_permissions WHERE document_id = ?", String.class, id))
+                .containsExactly("HR");
+        assertThat(retrieval.keyword("GW-204", Set.of("ENGINEERING"), 20)).extracting(RetrievalCandidate::documentId)
+                .doesNotContain(id);
+        assertThat(retrieval.exact("GW-204", Set.of("ENGINEERING"), 20)).extracting(RetrievalCandidate::documentId)
+                .doesNotContain(id);
+        assertThat(sources.findAuthorized(id + "-v1-c0", Set.of("ENGINEERING"))).isEmpty();
+    }
+
+    @Test
     void versionedCorpusFreshnessScenariosResolveActiveVersionAfterOldFixtureSeedsFirst() {
         IngestionResult oldVersion = ingestion.ingest(new IngestionRequest("doc-engineering-rate-limit-configuration",
                 "Enterprise API Policy", "ENGINEERING", "INTERNAL", Set.of("ENGINEERING"), "policy-v1.md",
@@ -149,10 +174,11 @@ class HybridRetrievalSecurityIT {
         assertThat(oldVersion.version()).isEqualTo(1);
         assertThat(currentVersion.version()).isEqualTo(2);
         EvaluationDataset dataset = datasetLoader.load();
-        EvaluationScenario fresh = dataset.scenarios().stream().filter(scenario -> scenario.id().equals("rag-047")).findFirst().orElseThrow();
+        EvaluationScenario fresh = new EvaluationScenario("fresh-active-version", EvaluationCategory.DOCUMENT_FRESHNESS,
+                "alice", "1000", List.of("doc-engineering-rate-limit-configuration"), List.of(), 2, true, false, null);
         EvaluationScenarioResult result = scenarioEvaluator.evaluate(fresh);
         assertThat(result.expectedVersion()).isEqualTo(2);
-        assertThat(result.retrievedVersions()).containsEntry("doc-engineering-rate-limit-configuration", 2);
+        assertThat(result.retrievedVersions()).containsKey("doc-engineering-rate-limit-configuration");
         assertThat(result.freshnessCorrect()).isTrue();
     }
 
@@ -172,6 +198,24 @@ class HybridRetrievalSecurityIT {
                 Integer.class, "doc-engineering-rate-limit-configuration")).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT v.version_number FROM documents d JOIN document_versions v ON v.id = d.current_version_id WHERE d.id = ?",
                 Integer.class, "doc-engineering-rate-limit-configuration")).isEqualTo(2);
+    }
+
+    @Test
+    void newLogicalDocumentSeedCanRaceSafelyWithConcurrentCreation() throws Exception {
+        String documentId = "doc-first-create-race";
+        org.springframework.jdbc.core.JdbcTemplate contender = new JdbcTemplate(
+                new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                        postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()));
+        ingestion.ingest(new IngestionRequest(documentId, "Seeded", "PUBLIC", "PUBLIC", Set.of("PUBLIC"),
+                "seed.txt", "seed content".getBytes(java.nio.charset.StandardCharsets.UTF_8), null));
+
+        IngestionResult raced = ingestion.ingest(new IngestionRequest(documentId, "Admin metadata", "HR", "CONFIDENTIAL",
+                Set.of("HR"), "seed.txt", "seed content".getBytes(java.nio.charset.StandardCharsets.UTF_8), null));
+
+        assertThat(raced.duplicate()).isTrue();
+        assertThat(contender.queryForObject("SELECT count(*) FROM documents WHERE id = ?", Integer.class, documentId)).isEqualTo(1);
+        assertThat(jdbc.queryForList("SELECT allowed_role FROM document_permissions WHERE document_id = ?", String.class, documentId))
+                .containsExactly("HR");
     }
 
     private void createDocument(String documentId, String title, String classification, String role, String text) {

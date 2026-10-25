@@ -16,10 +16,16 @@ This demo login is an identity selector, not password authentication or enterpri
 - Source preview re-authorizes role, document status, active version, and active index status in SQL.
 - Document listing/version metadata is role-filtered for ordinary users; the explicit document administrator may list/manage all metadata.
 - Evaluation run execution/results require the explicit administrator capability. Trace reads are visible only to the trace owner or explicit administrator.
+- Identical active content avoids embedding/version work but transactionally applies changed title, department, classification, and ACL. A narrowed ACL takes effect for subsequent vector, full-text, exact, citation, and source queries. Failed-content retries do not update the active ACL until successful activation.
+- `POST /api/documents/{id}/disable` disables retrieval while retaining the logical record; `DELETE /api/documents/{id}` soft-deletes by setting `DELETED`, also immediately excluding it from retrieval. Neither operation physically purges retained chunks.
 
 ## Data Handling
 
 Routine traces store a query hash and bounded timing/count/model/status metadata, not raw query text or retrieved source text. The chat response may contain authorized source citations; the source endpoint resolves the chunk under the caller's current ACL and active-version state. Trace retention defaults to 30 days.
+
+## License and Data Ownership
+
+The repository is distributed under the MIT License. The Acme corpus is synthetic and intended for publication. Do not upload confidential or personal source material into the portfolio demo.
 
 ## Limitations
 

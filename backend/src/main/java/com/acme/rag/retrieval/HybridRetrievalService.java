@@ -15,6 +15,7 @@ public class HybridRetrievalService {
     private final ExactIdentifierExtractor identifiers;
     private final ReciprocalRankFusion fusion;
     private final CurrentIdentity identity;
+    private final EvidenceSufficiencyGate sufficiencyGate;
     private final int candidateDepth;
 
     public HybridRetrievalService(
@@ -23,12 +24,14 @@ public class HybridRetrievalService {
             ExactIdentifierExtractor identifiers,
             ReciprocalRankFusion fusion,
             CurrentIdentity identity,
+            EvidenceSufficiencyGate sufficiencyGate,
             @Value("${app.retrieval.candidate-depth:10}") int candidateDepth) {
         this.embeddings = embeddings;
         this.repository = repository;
         this.identifiers = identifiers;
         this.fusion = fusion;
         this.identity = identity;
+        this.sufficiencyGate = sufficiencyGate;
         this.candidateDepth = candidateDepth;
     }
 
@@ -52,8 +55,10 @@ public class HybridRetrievalService {
         for (String identifier : identifiers.extract(query)) {
             exactCandidates.addAll(repository.exact(identifier, roles, candidateDepth));
         }
-        List<RankedChunk> chunks = fusion.fuse(List.of(vectorCandidates, keywordCandidates, exactCandidates));
-        return new RetrievalResult(chunks, vectorCandidates.size(), keywordCandidates.size(), exactCandidates.size());
+        List<RankedChunk> fused = fusion.fuse(List.of(vectorCandidates, keywordCandidates, exactCandidates));
+        EvidenceSufficiencyGate.Decision decision = sufficiencyGate.evaluate(query, fused);
+        return new RetrievalResult(decision.chunks(), vectorCandidates.size(), keywordCandidates.size(),
+                exactCandidates.size(), decision.sufficient(), decision.reason(), fused.size(), fused);
     }
 
     private static String normalize(String message) {

@@ -1,0 +1,2 @@
+ALTER TABLE evaluation_runs RENAME COLUMN abstention_accuracy TO evidence_gate_accuracy;
+ALTER TABLE evaluation_scenario_results RENAME COLUMN abstention_correct TO evidence_gate_correct;

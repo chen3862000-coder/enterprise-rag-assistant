@@ -10,6 +10,7 @@ public record EvaluationScenario(
         List<String> expectedDocumentIds,
         List<String> mustNotRetrieveDocumentIds,
         Integer expectedVersion,
+        Boolean shouldPassEvidenceGate,
         Boolean shouldAbstain,
         Boolean shouldNotAbstain) {
     public EvaluationScenario {
@@ -18,6 +19,16 @@ public record EvaluationScenario(
     }
 
     public boolean abstentionExpected() {
-        return Boolean.TRUE.equals(shouldAbstain) || expectedDocumentIds.isEmpty() && !Boolean.TRUE.equals(shouldNotAbstain);
+        return Boolean.TRUE.equals(shouldAbstain);
+    }
+
+    public boolean evidenceGateExpected() {
+        if (shouldPassEvidenceGate != null) {
+            return shouldPassEvidenceGate;
+        }
+        if (Boolean.TRUE.equals(shouldAbstain)) {
+            return false;
+        }
+        return Boolean.TRUE.equals(shouldNotAbstain) || !expectedDocumentIds.isEmpty();
     }
 }

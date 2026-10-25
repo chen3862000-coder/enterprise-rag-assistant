@@ -17,8 +17,8 @@ public final class EvaluationMetricsCalculator {
                 average(answerable.stream().map(EvaluationScenarioResult::reciprocalRank).toList()),
                 (int) results.stream().filter(EvaluationScenarioResult::aclLeakage).count(),
                 freshness.isEmpty() ? 0.0 : accuracy(freshness.stream().map(EvaluationScenarioResult::freshnessCorrect).toList()),
-                accuracy(results.stream().map(EvaluationScenarioResult::citationLogicCorrect).toList()),
-                accuracy(results.stream().map(EvaluationScenarioResult::abstentionCorrect).toList()));
+                accuracy(results.stream().map(EvaluationScenarioResult::citationIdValidationCorrect).toList()),
+                accuracy(results.stream().map(EvaluationScenarioResult::evidenceGateCorrect).toList()));
     }
 
     private static double average(List<Double> values) {

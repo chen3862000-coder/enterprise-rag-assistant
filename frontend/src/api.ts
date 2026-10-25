@@ -5,6 +5,7 @@ import type {
   EvaluationRun,
   EvaluationSummary,
   Identity,
+  IngestionResult,
   SourcePreview,
 } from './types'
 
@@ -58,13 +59,19 @@ export const api = {
   async versions(documentId: string) {
     return request<DocumentVersion[]>(`/api/documents/${encodeURIComponent(documentId)}/versions`)
   },
-  async upload(form: FormData, documentId?: string) {
+  async upload(form: FormData, documentId: string) {
     const path = documentId
       ? `/api/documents/${encodeURIComponent(documentId)}/reindex`
       : '/api/documents'
-    return request(path, { method: 'POST', headers: await csrfHeader(), body: form })
+    return request<IngestionResult>(path, { method: 'POST', headers: await csrfHeader(), body: form })
   },
   async disable(documentId: string) {
+    return request<void>(`/api/documents/${encodeURIComponent(documentId)}/disable`, {
+      method: 'POST',
+      headers: await csrfHeader(),
+    })
+  },
+  async deleteDocument(documentId: string) {
     return request<void>(`/api/documents/${encodeURIComponent(documentId)}`, {
       method: 'DELETE',
       headers: await csrfHeader(),

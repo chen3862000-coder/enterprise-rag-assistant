@@ -107,8 +107,8 @@ class DemoAuthenticationIT {
         MvcResult alice = login("alice");
         MvcResult bob = login("bob");
         UUID traceId = UUID.randomUUID();
-        traces.save(new RagTrace(traceId, "alice", 1, 2, 3, 1, 1, 0, 1, 1,
-                "deepseek", "model", "SUPPORTED", "SUCCEEDED", null, Instant.now()), "b".repeat(64));
+        traces.save(new RagTrace(traceId, "alice", 1, 2, 3, 1, 1, 0, 1, 1, true, "LEXICAL_AND_RELEVANCE_MATCH",
+                "deepseek", "model", "CITATIONS_PRESENT", "SUCCEEDED", null, Instant.now()), "b".repeat(64));
 
         mvc.perform(get("/api/traces/" + traceId).session((org.springframework.mock.web.MockHttpSession) alice.getRequest().getSession(false)))
                 .andExpect(status().isOk());
@@ -175,6 +175,36 @@ class DemoAuthenticationIT {
         assertThat(mvc.perform(get("/api/sources/doc-admin-upload-test-v1-c0")
                         .session((org.springframework.mock.web.MockHttpSession) carol.getRequest().getSession(false)))
                 .andReturn().getResponse().getStatus()).isEqualTo(404);
+    }
+
+    @Test
+    void explicitDisableAndDeleteRoutesHaveDistinctSoftDeleteStates() throws Exception {
+        jdbc.update("INSERT INTO documents (id, title, department, classification) VALUES ('doc-status-test', 'Status test', 'PUBLIC', 'PUBLIC')");
+        jdbc.update("INSERT INTO document_permissions (document_id, allowed_role) VALUES ('doc-status-test', 'PUBLIC')");
+        MvcResult carol = login("carol");
+        var session = (org.springframework.mock.web.MockHttpSession) carol.getRequest().getSession(false);
+
+        mvc.perform(post("/api/documents/doc-status-test/disable").with(csrf()).session(session))
+                .andExpect(status().isNoContent());
+        assertThat(jdbc.queryForObject("SELECT status FROM documents WHERE id='doc-status-test'", String.class))
+                .isEqualTo("DISABLED");
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/documents/doc-status-test")
+                        .with(csrf()).session(session))
+                .andExpect(status().isNoContent());
+        assertThat(jdbc.queryForObject("SELECT status FROM documents WHERE id='doc-status-test'", String.class))
+                .isEqualTo("DELETED");
+    }
+
+    @Test
+    void invalidUploadReturnsStructuredClientError() throws Exception {
+        MvcResult carol = login("carol");
+        var session = (org.springframework.mock.web.MockHttpSession) carol.getRequest().getSession(false);
+        mvc.perform(multipart("/api/documents").file(new MockMultipartFile("file", "bad.exe", "application/octet-stream", new byte[]{1}))
+                        .with(csrf()).session(session).param("documentId", "doc-bad-upload")
+                        .param("title", "Bad file").param("department", "PUBLIC")
+                        .param("classification", "PUBLIC").param("allowedRoles", "PUBLIC"))
+                .andExpect(status().isBadRequest())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value("INVALID_REQUEST"));
     }
 
     private MvcResult login(String username) throws Exception {

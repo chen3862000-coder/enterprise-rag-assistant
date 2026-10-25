@@ -16,8 +16,9 @@ public record EvaluationScenarioResult(
         double recallAt5,
         boolean aclLeakage,
         boolean freshnessCorrect,
-        boolean citationLogicCorrect,
-        boolean abstentionCorrect,
+        boolean citationIdValidationCorrect,
+        boolean evidenceGateCorrect,
+        String gateReason,
         boolean passed) {
     public EvaluationScenarioResult {
         expectedDocumentIds = List.copyOf(expectedDocumentIds);

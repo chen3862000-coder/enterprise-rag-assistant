@@ -2,6 +2,7 @@ package com.acme.rag.evaluation;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.Map;
 
 public record EvaluationRunSummary(
         UUID runId,
@@ -9,8 +10,13 @@ public record EvaluationRunSummary(
         String datasetVersion,
         String method,
         String embeddingModelId,
+        Map<String, Object> retrievalConfiguration,
         int scenarioCount,
         EvaluationMetrics metrics,
         String status,
         Instant startedAt,
-        Instant completedAt) {}
+        Instant completedAt) {
+    public EvaluationRunSummary {
+        retrievalConfiguration = Map.copyOf(retrievalConfiguration);
+    }
+}

@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 class EvaluationMetricsCalculatorTest {
     @Test
-    void excludesUnanswerableScenariosFromRetrievalRecallAndMrr() {
+    void excludesUnanswerableCasesFromRetrievalRecallAndMrrButScoresSharedEvidenceGate() {
         EvaluationScenarioResult fact = result("fact", List.of("doc"), 1.0, 1.0, false, true, true, true);
         EvaluationScenarioResult impossible = result("unknown", List.of(), 0.0, 0.0, false, true, true, true);
 
@@ -16,12 +16,12 @@ class EvaluationMetricsCalculatorTest {
 
         assertThat(metrics.recallAt5()).isEqualTo(1.0);
         assertThat(metrics.meanReciprocalRank()).isEqualTo(1.0);
-        assertThat(metrics.abstentionAccuracy()).isEqualTo(1.0);
+        assertThat(metrics.evidenceGateAccuracy()).isEqualTo(1.0);
     }
 
     private static EvaluationScenarioResult result(String id, List<String> expected, double recall, double mrr,
-                                                   boolean leakage, boolean freshness, boolean citation, boolean abstention) {
+                                                   boolean leakage, boolean freshness, boolean citation, boolean gateCorrect) {
         return new EvaluationScenarioResult(id, EvaluationCategory.FACT_LOOKUP, expected, List.of(), List.of(), List.of(),
-                null, Map.of(), mrr, recall, leakage, freshness, citation, abstention, true);
+                null, Map.of(), mrr, recall, leakage, freshness, citation, gateCorrect, "TEST", true);
     }
 }

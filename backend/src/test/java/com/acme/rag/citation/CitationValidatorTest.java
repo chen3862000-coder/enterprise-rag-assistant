@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 class CitationValidatorTest {
     @Test
-    void retainsOnlyCitationIdsActuallySuppliedInContext() {
+    void validatesSuppliedCitationIdsButDoesNotAssertClaimEntailment() {
         CitationEvidence first = evidence("S1", "chunk-1");
         CitationEvidence second = evidence("S2", "chunk-2");
 
@@ -24,9 +24,9 @@ class CitationValidatorTest {
 
         var result = new CitationResponseBuilder(new CitationValidator()).validate("Claim without evidence [S9].", List.of(first));
 
-        assertThat(result.answer()).contains("could not verify");
+        assertThat(result.answer()).contains("no answer claim was validated");
         assertThat(result.citations()).isEmpty();
-        assertThat(result.groundingStatus()).isEqualTo("INSUFFICIENT_EVIDENCE");
+        assertThat(result.groundingStatus()).isEqualTo("CITATION_IDS_UNAVAILABLE");
     }
 
     @Test
@@ -41,6 +41,7 @@ class CitationValidatorTest {
     }
 
     private static CitationEvidence evidence(String id, String chunkId) {
-        return new CitationEvidence(id, new RankedChunk(chunkId, UUID.randomUUID(), "doc", "Title", 1, "Section", "text", 1.0));
+        return new CitationEvidence(id, new RankedChunk(chunkId, UUID.randomUUID(), "doc", "Title", 1,
+                "Section", "text", 1.0, 0.9, 0.5, false));
     }
 }

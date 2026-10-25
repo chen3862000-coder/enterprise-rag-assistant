@@ -51,6 +51,16 @@ class EvaluationTracePersistenceIT {
     }
 
     @Test
+    void flywaySchemaHasRenamedGateAndCitationValidationMetrics() {
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='evaluation_runs' AND column_name='evidence_gate_accuracy'",
+                Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='evaluation_runs' AND column_name='citation_id_validation_accuracy'",
+                Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='evaluation_scenario_results' AND column_name='gate_reason'",
+                Integer.class)).isEqualTo(1);
+    }
+
+    @Test
     void tracePersistsOnlyHashAndAccessIsScopedByOwnerOrAdmin() {
         UUID id = UUID.randomUUID();
         String hash = "a".repeat(64);
@@ -65,13 +75,26 @@ class EvaluationTracePersistenceIT {
     }
 
     @Test
+    void failedTraceStoresBoundedCategoryWithoutQueryText() {
+        UUID id = UUID.randomUUID();
+        RagTrace failed = new RagTrace(id, "alice", 3, 0, 3, 0, 0, 0, 0, 0,
+                false, "NO_AUTHORIZED_CANDIDATES", "none", "none", "INSUFFICIENT_EVIDENCE",
+                "FAILED", "RETRIEVAL_STORAGE_ERROR", Instant.now());
+        traces.save(failed, "c".repeat(64));
+
+        assertThat(traces.find(id, "alice", false)).get()
+                .extracting(RagTrace::status, RagTrace::errorCategory, RagTrace::modelProvider)
+                .containsExactly("FAILED", "RETRIEVAL_STORAGE_ERROR", "none");
+    }
+
+    @Test
     void evaluationRunAndScenarioResultsArePersistedAndReloaded() {
         Instant now = Instant.now();
         EvaluationScenarioResult scenario = new EvaluationScenarioResult("rag-001", EvaluationCategory.FACT_LOOKUP,
                 List.of("doc-policy"), List.of("doc-policy"), List.of(), List.of(), 2, Map.of("doc-policy", 2),
-                1.0, 1.0, false, true, true, true, true);
+                1.0, 1.0, false, true, true, true, "EXACT_IDENTIFIER_MATCH", true);
         EvaluationRunResult run = new EvaluationRunResult(UUID.randomUUID(), "dataset-v1", "OFFLINE_RETRIEVAL",
-                "test-embedding", 1, new EvaluationMetrics(1.0, 1.0, 0, 1.0, 1.0, 1.0),
+                "test-embedding", Map.of("candidateDepth", 10), 1, new EvaluationMetrics(1.0, 1.0, 0, 1.0, 1.0, 1.0),
                 "SUCCEEDED", now, now, List.of(scenario));
 
         runs.save(run, "carol", Map.of("candidateDepth", 10, "fusedDepth", 8, "rrfConstant", 60));
@@ -82,7 +105,7 @@ class EvaluationTracePersistenceIT {
 
     private static RagTrace trace(UUID id, String username) {
         Instant now = Instant.now();
-        return new RagTrace(id, username, 10, 20, 30, 4, 3, 1, 5, 2,
-                "deepseek", "deepseek-chat", "SUPPORTED", "SUCCEEDED", null, now);
+        return new RagTrace(id, username, 10, 20, 30, 4, 3, 1, 5, 2, true, "LEXICAL_AND_RELEVANCE_MATCH",
+                "deepseek", "deepseek-chat", "CITATIONS_PRESENT", "SUCCEEDED", null, now);
     }
 }

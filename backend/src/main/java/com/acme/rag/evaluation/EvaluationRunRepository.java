@@ -34,12 +34,12 @@ public class EvaluationRunRepository {
             jdbc.update("""
                     INSERT INTO evaluation_runs (id, requested_by, dataset_version, evaluation_method, embedding_model_id,
                         retrieval_configuration, scenario_count, recall_at_5, mean_reciprocal_rank, acl_leakage_count,
-                        freshness_accuracy, citation_logic_accuracy, abstention_accuracy, status, started_at, completed_at)
+                        freshness_accuracy, citation_id_validation_accuracy, evidence_gate_accuracy, status, started_at, completed_at)
                     VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, run.runId(), requestedBy, run.datasetVersion(), run.method(), run.embeddingModelId(),
                     json(retrievalConfiguration), run.scenarioCount(), metrics.recallAt5(), metrics.meanReciprocalRank(),
-                    metrics.aclLeakageCount(), metrics.freshnessAccuracy(), metrics.citationLogicAccuracy(),
-                    metrics.abstentionAccuracy(), run.status(), Timestamp.from(run.startedAt()), Timestamp.from(run.completedAt()));
+                    metrics.aclLeakageCount(), metrics.freshnessAccuracy(), metrics.citationIdValidationAccuracy(),
+                    metrics.evidenceGateAccuracy(), run.status(), Timestamp.from(run.startedAt()), Timestamp.from(run.completedAt()));
             for (EvaluationScenarioResult result : run.scenarios()) {
                 saveScenario(run.runId(), result);
             }
@@ -48,25 +48,27 @@ public class EvaluationRunRepository {
 
     public EvaluationRunResult find(UUID id, String requestedBy) {
         RunRow run = client.sql("""
-                SELECT id, requested_by, dataset_version, evaluation_method, embedding_model_id, scenario_count, recall_at_5,
-                    mean_reciprocal_rank, acl_leakage_count, freshness_accuracy, citation_logic_accuracy, abstention_accuracy,
+                SELECT id, requested_by, dataset_version, evaluation_method, embedding_model_id, retrieval_configuration, scenario_count, recall_at_5,
+                    mean_reciprocal_rank, acl_leakage_count, freshness_accuracy, citation_id_validation_accuracy, evidence_gate_accuracy,
                     status, started_at, completed_at
                 FROM evaluation_runs WHERE id = :id
                 """).param("id", id).query((rs, row) -> new RunRow(
                 rs.getObject("id", UUID.class), requestedBy, rs.getString("dataset_version"), rs.getString("evaluation_method"),
-                rs.getString("embedding_model_id"), rs.getInt("scenario_count"), rs.getDouble("recall_at_5"),
+                rs.getString("embedding_model_id"), readConfiguration(rs.getString("retrieval_configuration")),
+                rs.getInt("scenario_count"), rs.getDouble("recall_at_5"),
                 rs.getDouble("mean_reciprocal_rank"), rs.getInt("acl_leakage_count"),
-                rs.getDouble("freshness_accuracy"), rs.getDouble("citation_logic_accuracy"),
-                rs.getDouble("abstention_accuracy"), rs.getString("status"), rs.getTimestamp("started_at").toInstant(),
+                rs.getDouble("freshness_accuracy"), rs.getDouble("citation_id_validation_accuracy"),
+                rs.getDouble("evidence_gate_accuracy"), rs.getString("status"), rs.getTimestamp("started_at").toInstant(),
                 rs.getTimestamp("completed_at").toInstant())).single();
         List<EvaluationScenarioResult> results = client.sql("""
                 SELECT scenario_id, category, expected_document_ids, retrieved_document_ids, missing_document_ids,
                     forbidden_document_ids, expected_version, retrieved_versions, reciprocal_rank, recall_at_5,
-                    acl_leakage, freshness_correct, citation_logic_correct, abstention_correct, passed
+                    acl_leakage, freshness_correct, citation_id_validation_correct, evidence_gate_correct, gate_reason, passed
                 FROM evaluation_scenario_results WHERE run_id = :id ORDER BY scenario_id
                 """).param("id", id).query((rs, row) -> scenarioResult(rs)).list();
-        return new EvaluationRunResult(run.id(), run.datasetVersion(), run.method(), run.embeddingModelId(), run.scenarioCount(),
-                new EvaluationMetrics(run.recallAt5(), run.mrr(), run.leakage(), run.freshness(), run.citation(), run.abstention()),
+        return new EvaluationRunResult(run.id(), run.datasetVersion(), run.method(), run.embeddingModelId(),
+                run.retrievalConfiguration(), run.scenarioCount(),
+                new EvaluationMetrics(run.recallAt5(), run.mrr(), run.leakage(), run.freshness(), run.citation(), run.evidenceGate()),
                 run.status(), run.startedAt(), run.completedAt(), results);
     }
 
@@ -75,16 +77,17 @@ public class EvaluationRunRepository {
             throw new IllegalArgumentException("Evaluation result limit must be between 1 and 100");
         }
         return client.sql("""
-                SELECT id, requested_by, dataset_version, evaluation_method, embedding_model_id, scenario_count,
+                SELECT id, requested_by, dataset_version, evaluation_method, embedding_model_id, retrieval_configuration, scenario_count,
                     recall_at_5, mean_reciprocal_rank, acl_leakage_count, freshness_accuracy,
-                    citation_logic_accuracy, abstention_accuracy, status, started_at, completed_at
+                    citation_id_validation_accuracy, evidence_gate_accuracy, status, started_at, completed_at
                 FROM evaluation_runs ORDER BY started_at DESC LIMIT :limit
                 """).param("limit", limit).query((rs, row) -> new EvaluationRunSummary(
                 rs.getObject("id", UUID.class), rs.getString("requested_by"), rs.getString("dataset_version"),
-                rs.getString("evaluation_method"), rs.getString("embedding_model_id"), rs.getInt("scenario_count"),
+                rs.getString("evaluation_method"), rs.getString("embedding_model_id"),
+                readConfiguration(rs.getString("retrieval_configuration")), rs.getInt("scenario_count"),
                 new EvaluationMetrics(rs.getDouble("recall_at_5"), rs.getDouble("mean_reciprocal_rank"),
                         rs.getInt("acl_leakage_count"), rs.getDouble("freshness_accuracy"),
-                        rs.getDouble("citation_logic_accuracy"), rs.getDouble("abstention_accuracy")),
+                        rs.getDouble("citation_id_validation_accuracy"), rs.getDouble("evidence_gate_accuracy")),
                 rs.getString("status"), rs.getTimestamp("started_at").toInstant(),
                 rs.getTimestamp("completed_at").toInstant())).list();
     }
@@ -94,12 +97,13 @@ public class EvaluationRunRepository {
                 INSERT INTO evaluation_scenario_results (run_id, scenario_id, category, expected_document_ids,
                     retrieved_document_ids, missing_document_ids, forbidden_document_ids, expected_version,
                     retrieved_versions, reciprocal_rank, recall_at_5, acl_leakage, freshness_correct,
-                    citation_logic_correct, abstention_correct, passed)
-                VALUES (?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?)
+                    citation_id_validation_correct, evidence_gate_correct, gate_reason, passed)
+                VALUES (?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, runId, result.scenarioId(), result.category().name(), json(result.expectedDocumentIds()),
                 json(result.retrievedDocumentIds()), json(result.missingDocumentIds()), json(result.forbiddenDocumentIds()),
                 result.expectedVersion(), json(result.retrievedVersions()), result.reciprocalRank(), result.recallAt5(),
-                result.aclLeakage(), result.freshnessCorrect(), result.citationLogicCorrect(), result.abstentionCorrect(), result.passed());
+                result.aclLeakage(), result.freshnessCorrect(), result.citationIdValidationCorrect(), result.evidenceGateCorrect(),
+                result.gateReason(), result.passed());
     }
 
     private EvaluationScenarioResult scenarioResult(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -108,8 +112,8 @@ public class EvaluationRunRepository {
                 readList(rs.getString("missing_document_ids")), readList(rs.getString("forbidden_document_ids")),
                 (Integer) rs.getObject("expected_version"), readMap(rs.getString("retrieved_versions")),
                 rs.getDouble("reciprocal_rank"), rs.getDouble("recall_at_5"), rs.getBoolean("acl_leakage"),
-                rs.getBoolean("freshness_correct"), rs.getBoolean("citation_logic_correct"),
-                rs.getBoolean("abstention_correct"), rs.getBoolean("passed"));
+                    rs.getBoolean("freshness_correct"), rs.getBoolean("citation_id_validation_correct"),
+                rs.getBoolean("evidence_gate_correct"), rs.getString("gate_reason"), rs.getBoolean("passed"));
     }
 
     private String json(Object value) {
@@ -136,7 +140,16 @@ public class EvaluationRunRepository {
         }
     }
 
-    private record RunRow(UUID id, String requestedBy, String datasetVersion, String method, String embeddingModelId, int scenarioCount,
+    private Map<String, Object> readConfiguration(String value) {
+        try {
+            return mapper.readValue(value, mapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Stored retrieval configuration is invalid", exception);
+        }
+    }
+
+    private record RunRow(UUID id, String requestedBy, String datasetVersion, String method, String embeddingModelId,
+                          Map<String, Object> retrievalConfiguration, int scenarioCount,
                           double recallAt5, double mrr, int leakage, double freshness, double citation,
-                          double abstention, String status, Instant startedAt, Instant completedAt) {}
+                          double evidenceGate, String status, Instant startedAt, Instant completedAt) {}
 }

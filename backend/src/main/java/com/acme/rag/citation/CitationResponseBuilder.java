@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 @Component
 public final class CitationResponseBuilder {
     private static final Pattern CITATION_TOKEN = Pattern.compile("\\[?\\bS[0-9]+\\b\\]?");
-    private static final String ABSTENTION = "I could not verify this answer with authorized source evidence.";
+    private static final String ABSTENTION = "Citations identify supplied sources only; no answer claim was validated.";
     private final CitationValidator validator;
 
     public CitationResponseBuilder(CitationValidator validator) {
@@ -29,9 +29,9 @@ public final class CitationResponseBuilder {
         matcher.appendTail(sanitized);
         List<Citation> citations = cited.stream().map(this::toCitation).toList();
         if (citations.isEmpty()) {
-            return new ValidatedAnswer(ABSTENTION, citations, "INSUFFICIENT_EVIDENCE");
+            return new ValidatedAnswer(ABSTENTION, citations, "CITATION_IDS_UNAVAILABLE");
         }
-        return new ValidatedAnswer(sanitized.toString().strip(), citations, "SUPPORTED");
+        return new ValidatedAnswer(sanitized.toString().strip(), citations, "CITATIONS_PRESENT");
     }
 
     public boolean hasInvalidCitations(String answer, List<CitationEvidence> supplied) {
@@ -45,6 +45,20 @@ public final class CitationResponseBuilder {
             }
         }
         return false;
+    }
+
+    public String stripUnsupportedCitationClaims(String answer, List<CitationEvidence> supplied) {
+        java.util.Set<String> suppliedIds = supplied.stream().map(CitationEvidence::citationId)
+                .collect(java.util.stream.Collectors.toSet());
+        Matcher matcher = CITATION_TOKEN.matcher(answer);
+        StringBuilder sanitized = new StringBuilder();
+        while (matcher.find()) {
+            String id = matcher.group().replace("[", "").replace("]", "");
+            matcher.appendReplacement(sanitized,
+                    Matcher.quoteReplacement(suppliedIds.contains(id) ? "[" + id + "]" : ""));
+        }
+        matcher.appendTail(sanitized);
+        return sanitized.toString().strip();
     }
 
     private Citation toCitation(CitationEvidence evidence) {

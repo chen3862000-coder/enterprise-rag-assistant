@@ -9,6 +9,7 @@ import com.acme.rag.document.chunking.DocumentChunker;
 import com.acme.rag.document.parsing.DocumentParser;
 import com.acme.rag.document.parsing.PdfDocumentParser;
 import com.acme.rag.document.parsing.TextDocumentParser;
+import com.acme.rag.observability.RagMetrics;
 import com.acme.rag.M2TestConfiguration;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -85,8 +86,43 @@ class DocumentIngestionServiceIT {
 
         assertThat(duplicate.duplicate()).isTrue();
         assertThat(duplicate.versionId()).isEqualTo(first.versionId());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM ingestion_jobs WHERE document_id = ?", Integer.class,
+                "doc-duplicate-test")).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM document_versions WHERE document_id = ?", Integer.class, "doc-duplicate-test"))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void sameContentAclAndMetadataUpdatesAreAppliedWithoutCreatingVersion() {
+        byte[] bytes = "# Leave\nSynthetic policy".getBytes(StandardCharsets.UTF_8);
+        IngestionRequest original = new IngestionRequest("doc-acl-update", "Policy", "ENGINEERING", "INTERNAL",
+                Set.of("ENGINEERING"), "policy.md", bytes, null);
+        ingestionService.ingest(original);
+        IngestionResult updated = ingestionService.ingest(new IngestionRequest("doc-acl-update", "Updated title", "HR",
+                "CONFIDENTIAL", Set.of("HR"), "policy.md", bytes, null));
+
+        assertThat(updated.duplicate()).isTrue();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM document_versions WHERE document_id = ?", Integer.class,
+                "doc-acl-update")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT title FROM documents WHERE id = ?", String.class, "doc-acl-update"))
+                .isEqualTo("Updated title");
+        assertThat(jdbc.queryForList("SELECT allowed_role FROM document_permissions WHERE document_id = ?", String.class,
+                "doc-acl-update")).containsExactly("HR");
+    }
+
+    @Test
+    void identicalNoOpUploadDoesNotCreateAnotherIngestionJob() {
+        IngestionRequest request = request("doc-noop-dedup", "Unchanged current content");
+        ingestionService.ingest(request);
+        int jobsBefore = jdbc.queryForObject("SELECT count(*) FROM ingestion_jobs WHERE document_id = ?", Integer.class,
+                request.documentId());
+
+        IngestionResult duplicate = ingestionService.ingest(request);
+
+        assertThat(duplicate.duplicate()).isTrue();
+        assertThat(duplicate.metadataUpdated()).isFalse();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM ingestion_jobs WHERE document_id = ?", Integer.class,
+                request.documentId())).isEqualTo(jobsBefore);
     }
 
     @Test
@@ -119,7 +155,7 @@ class DocumentIngestionServiceIT {
                         "bad-model", 768),
                 new EmbeddingService(wrongDimensionModel, 768),
                 parsers,
-                new DocumentChunker(1800, 240));
+                new DocumentChunker(1800, 240), new RagMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
 
         assertThatThrownBy(() -> invalidEmbeddingService.ingest(request("doc-rollback-test", "Second version")))
                 .isInstanceOf(IngestionException.class)
@@ -132,8 +168,9 @@ class DocumentIngestionServiceIT {
 
     @Test
     void replacementPermissionsActivateOnlyAlongsideSuccessfulNewVersion() {
+        byte[] original = "# Policy\nOriginal".getBytes(StandardCharsets.UTF_8);
         ingestionService.ingest(new IngestionRequest("doc-permission-version", "Policy", "ENGINEERING", "INTERNAL",
-                Set.of("ENGINEERING"), "policy.md", "# Policy\nOriginal".getBytes(StandardCharsets.UTF_8), null));
+                Set.of("ENGINEERING"), "policy.md", original, null));
 
         assertThat(jdbc.queryForList("SELECT allowed_role FROM document_permissions WHERE document_id = ?", String.class,
                 "doc-permission-version")).containsExactly("ENGINEERING");
@@ -145,10 +182,11 @@ class DocumentIngestionServiceIT {
         DocumentIngestionService service = new DocumentIngestionService(new UploadValidator(parsers, 10_485_760),
                 new DocumentVersionRepository(jdbc, org.springframework.jdbc.core.simple.JdbcClient.create(jdbc),
                         new TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource())),
-                        "bad-model", 768), new EmbeddingService(invalid, 768), parsers, new DocumentChunker(1800, 240));
+                        "bad-model", 768), new EmbeddingService(invalid, 768), parsers, new DocumentChunker(1800, 240),
+                new RagMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
 
         assertThatThrownBy(() -> service.ingest(new IngestionRequest("doc-permission-version", "Policy", "HR", "CONFIDENTIAL",
-                Set.of("HR"), "policy.md", "# Policy\nReplacement".getBytes(StandardCharsets.UTF_8), null)))
+                Set.of("HR"), "policy.md", "# Policy\nChanged content that forces embedding".getBytes(StandardCharsets.UTF_8), null)))
                 .isInstanceOf(IngestionException.class);
 
         assertThat(jdbc.queryForList("SELECT allowed_role FROM document_permissions WHERE document_id = ?", String.class,

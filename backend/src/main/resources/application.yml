@@ -43,7 +43,8 @@ app:
     candidate-depth: 10
     fused-depth: 8
     rrf-constant: 60
-    minimum-evidence-count: 1
+    minimum-vector-similarity: ${MINIMUM_VECTOR_SIMILARITY:0.35}
+    minimum-keyword-score: ${MINIMUM_KEYWORD_SCORE:0.0005}
     max-context-characters: 12000
   ingestion:
     max-file-bytes: 10485760

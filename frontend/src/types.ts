@@ -17,7 +17,7 @@ export type ChatResponse = {
   answer: string
   citations: Citation[]
   traceId: string
-  groundingStatus: 'SUPPORTED' | 'INSUFFICIENT_EVIDENCE'
+  groundingStatus: 'CITATIONS_PRESENT' | 'INSUFFICIENT_EVIDENCE'
 }
 
 export type SourcePreview = {
@@ -34,7 +34,7 @@ export type DocumentSummary = {
   title: string
   department: string
   classification: string
-  status: string
+  status: 'ACTIVE' | 'DISABLED' | 'DELETED'
   currentVersion: number | null
   indexStatus: string | null
   updatedAt: string | null
@@ -53,13 +53,23 @@ export type DocumentVersion = {
   active: boolean
 }
 
+export type IngestionResult = {
+  documentId: string
+  versionId: string
+  jobId: string | null
+  version: number
+  chunkCount: number
+  duplicate: boolean
+  metadataUpdated: boolean
+}
+
 export type EvaluationMetrics = {
   recallAt5: number
   meanReciprocalRank: number
   aclLeakageCount: number
   freshnessAccuracy: number
-  citationLogicAccuracy: number
-  abstentionAccuracy: number
+  citationIdValidationAccuracy: number
+  evidenceGateAccuracy: number
 }
 
 export type EvaluationSummary = {
@@ -68,6 +78,7 @@ export type EvaluationSummary = {
   datasetVersion: string
   method: string
   embeddingModelId: string
+  retrievalConfiguration: Record<string, unknown>
   scenarioCount: number
   metrics: EvaluationMetrics
   status: string
@@ -89,8 +100,9 @@ export type EvaluationRun = EvaluationSummary & {
     recallAt5: number
     aclLeakage: boolean
     freshnessCorrect: boolean
-    citationLogicCorrect: boolean
-    abstentionCorrect: boolean
+    citationIdValidationCorrect: boolean
+    evidenceGateCorrect: boolean
+    gateReason: string
     passed: boolean
   }>
 }

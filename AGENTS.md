@@ -20,6 +20,7 @@ Before declaring a coding task complete:
 - These are review limits, not reasons to mechanically fragment cohesive code. When a limit is exceeded, document why the class/method remains cohesive and why extraction would make the design worse.
 - Controllers must remain thin. Authorization must not be delegated to the LLM. Avoid unnecessary abstractions and dependencies.
 - Use parameterized SQL. Never pass unauthorized retrieved material to fusion, generation, logs, citations, source previews, or traces.
+- Evidence sufficiency and abstention behavior must be deterministic, shared between runtime chat and offline evaluation, and tested with weak-evidence hard negatives.
 - Do not add or claim functionality, metrics, security guarantees, or test results that have not been implemented and verified.
 
 ## Completion Review

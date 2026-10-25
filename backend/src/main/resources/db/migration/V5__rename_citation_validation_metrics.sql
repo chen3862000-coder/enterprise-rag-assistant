@@ -1,0 +1,2 @@
+ALTER TABLE evaluation_runs RENAME COLUMN citation_logic_accuracy TO citation_id_validation_accuracy;
+ALTER TABLE evaluation_scenario_results RENAME COLUMN citation_logic_correct TO citation_id_validation_correct;

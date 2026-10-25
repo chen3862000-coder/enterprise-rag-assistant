@@ -19,7 +19,7 @@ class CitationAccessValidatorTest {
         when(identity.allowedRoles()).thenReturn(Set.of("ENGINEERING"));
         when(repository.findAuthorized("chunk", Set.of("ENGINEERING"))).thenReturn(Optional.empty());
         Citation citation = new Citation("S1", "doc", "Policy", 1, "chunk", "Section");
-        var answer = new CitationResponseBuilder.ValidatedAnswer("Claim [S1]", List.of(citation), "SUPPORTED");
+        var answer = new CitationResponseBuilder.ValidatedAnswer("Claim [S1]", List.of(citation), "CITATIONS_PRESENT");
 
         var checked = new CitationAccessValidator(repository, identity).reauthorize(answer);
 
@@ -36,7 +36,7 @@ class CitationAccessValidatorTest {
         when(repository.findAuthorized("chunk", Set.of("ENGINEERING"))).thenReturn(Optional.of(
                 new SourcePreview("chunk", "doc", "Policy", 2, "Section", "new version")));
         Citation citation = new Citation("S1", "doc", "Policy", 1, "chunk", "Section");
-        var answer = new CitationResponseBuilder.ValidatedAnswer("Claim [S1]", List.of(citation), "SUPPORTED");
+        var answer = new CitationResponseBuilder.ValidatedAnswer("Claim [S1]", List.of(citation), "CITATIONS_PRESENT");
 
         var checked = new CitationAccessValidator(repository, identity).reauthorize(answer);
 
@@ -57,10 +57,10 @@ class CitationAccessValidatorTest {
                 new Citation("S2", "doc-2", "Restricted", 1, "chunk-2", "Two"));
 
         var checked = new CitationAccessValidator(repository, identity).reauthorize(
-                new CitationResponseBuilder.ValidatedAnswer("Combined claim [S1] [S2]", citations, "SUPPORTED"));
+                new CitationResponseBuilder.ValidatedAnswer("Combined claim [S1] [S2]", citations, "CITATIONS_PRESENT"));
 
         assertThat(checked.citations()).isEmpty();
-        assertThat(checked.answer()).contains("could not verify");
+        assertThat(checked.answer()).contains("sufficient currently authorized source evidence");
         assertThat(checked.groundingStatus()).isEqualTo("INSUFFICIENT_EVIDENCE");
     }
 }

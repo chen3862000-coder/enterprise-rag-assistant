@@ -5,5 +5,5 @@ public record EvaluationMetrics(
         double meanReciprocalRank,
         int aclLeakageCount,
         double freshnessAccuracy,
-        double citationLogicAccuracy,
-        double abstentionAccuracy) {}
+        double citationIdValidationAccuracy,
+        double evidenceGateAccuracy) {}

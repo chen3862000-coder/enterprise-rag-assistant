@@ -49,6 +49,15 @@ export function KnowledgeWorkspace({ identity }: { identity: Identity }) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to soft-delete document') }
   }
 
+  async function restoreDocument(document: DocumentSummary) {
+    try {
+      await api.restoreDocument(document.id)
+      setNotice(`${document.title} restored to retrieval.`)
+      setSelected(null)
+      await refresh()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to restore document') }
+  }
+
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = event.currentTarget
@@ -93,7 +102,7 @@ export function KnowledgeWorkspace({ identity }: { identity: Identity }) {
         </div>)}
       </section>
       <aside className="knowledge-aside"><div className="aside-card principle-card"><div className="aside-icon"><Shield size={18} /></div><span className="eyebrow dark">INDEX PRINCIPLE</span><h3>Only active evidence travels.</h3><p>Versions are prepared away from retrieval. A complete index switches active atomically; failed work leaves the last healthy version in place.</p><div className="principle-step"><i>01</i> Stage &amp; validate</div><div className="principle-step"><i>02</i> Atomic activation</div><div className="principle-step"><i>03</i> ACL before search</div></div>
-        {identity.documentAdmin && <div className="aside-card admin-card"><div className="admin-kicker"><span /> ADMIN ACTIONS</div><strong>Carol’s management scope</strong><p>Management permission is separate from access to classified evidence.</p>{selected && selected.status === 'ACTIVE' && <button className="danger-button" onClick={() => void disableDocument(selected)}><Archive size={15} /> Disable selected document</button>}{selected && selected.status !== 'DELETED' && <button className="danger-button" onClick={() => void deleteDocument(selected)}><Trash2 size={15} /> Soft-delete selected document</button>}</div>}
+        {identity.documentAdmin && <div className="aside-card admin-card"><div className="admin-kicker"><span /> ADMIN ACTIONS</div><strong>Carol’s management scope</strong><p>Management permission is separate from access to classified evidence.</p>{selected && selected.status === 'ACTIVE' && <button className="danger-button" onClick={() => void disableDocument(selected)}><Archive size={15} /> Disable selected document</button>}{selected && selected.status !== 'DELETED' && <button className="danger-button" onClick={() => void deleteDocument(selected)}><Trash2 size={15} /> Soft-delete selected document</button>}{selected && selected.status !== 'ACTIVE' && selected.currentVersion !== null && <button className="secondary-button" onClick={() => void restoreDocument(selected)}>Restore selected document</button>}</div>}
         <div className="aside-card scope-card"><span className="eyebrow dark">YOUR RETRIEVAL SCOPE</span><h3>{identity.roles.join(' · ')}</h3><p>These roles filter retrieval. Management permission does not expand your chat evidence scope.</p></div>
       </aside>
     </div>
@@ -107,7 +116,7 @@ export function uploadErrorMessage(cause: unknown) {
   if (!(cause instanceof Error)) return 'Upload failed. Check the file and document details, then retry.'
   const code = 'code' in cause ? cause.code : undefined
   if (code === 'INGESTION_INVALID_INPUT') return `Upload rejected: ${cause.message}`
-  if (code === 'INGESTION_CONFLICT') return 'This identical document version is already being indexed. Wait for it to finish, then retry.'
+  if (code === 'INGESTION_CONFLICT') return 'This document is inactive or already being indexed. Restore inactive documents or wait for indexing to finish, then retry.'
   if (code === 'INGESTION_UNPROCESSABLE') return `Document could not be indexed: ${cause.message}`
   if (code === 'INGESTION_PROVIDER_UNAVAILABLE') return 'The embedding service is temporarily unavailable. Your active document version was not replaced; retry later.'
   return cause.message || 'Upload failed. Check the file and document details, then retry.'

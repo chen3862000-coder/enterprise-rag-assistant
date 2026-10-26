@@ -24,18 +24,19 @@ class EvaluationMetricsCalculatorTest {
         EvaluationScenarioResult base = result("false-abstention", List.of("doc"), 1.0, 1.0,
                 false, true, true, false);
         var diagnostics = new EvaluationScenarioResult.GateDiagnostics(1, 0.7, 0.0, 0.7, 0.0,
-                false, 1, 0, 0, Map.of("CURRENT_AND", false, "VECTOR_ONLY", true,
-                "KEYWORD_ONLY", false, "RELAXED_AND", false),
+                false, 1, 0, 0, Map.of("CURRENT_COVERAGE", false, "VECTOR_ONLY", true,
+                "LEXICAL_COVERAGE_ONLY", false, "COVERAGE_030", false, "COVERAGE_040", false),
+                0.7, 0.0, 0.0, false, false, false,
                 new EvaluationScenarioResult.GateDiagnostics.PrefixShadowDiagnostics(List.of(), 0.0, 0.0, false, 0.0));
         EvaluationScenarioResult falseAbstention = new EvaluationScenarioResult(base.scenarioId(), base.category(),
                 base.expectedDocumentIds(), List.of("doc"), base.missingDocumentIds(),
                 base.forbiddenDocumentIds(), base.expectedVersion(), base.retrievedVersions(), base.reciprocalRank(),
-                base.recallAt5(), true, base.aclLeakage(), base.freshnessCorrect(), base.citationIdValidationCorrect(),
+                base.recallAt5(), true, true, base.aclLeakage(), base.freshnessCorrect(), base.citationIdValidationCorrect(),
                 false, "NO_KEYWORD_MATCH", diagnostics, false);
 
         EvaluationMetrics metrics = new EvaluationMetricsCalculator().calculate(List.of(falseAbstention));
 
-        assertThat(metrics.gateAblationMetrics().get("CURRENT_AND").falseAbstention()).isEqualTo(1);
+        assertThat(metrics.gateAblationMetrics().get("CURRENT_COVERAGE").falseAbstention()).isEqualTo(1);
         assertThat(metrics.gateAblationMetrics().get("VECTOR_ONLY").truePass()).isEqualTo(1);
     }
 
@@ -44,12 +45,13 @@ class EvaluationMetricsCalculatorTest {
         EvaluationScenarioResult base = result("prefix", List.of("doc"), 0.0, 0.0,
                 false, true, true, false);
         var diagnostics = new EvaluationScenarioResult.GateDiagnostics(1, 0.6, 0.0, 0.6, 0.0,
-                false, 1, 0, 0, Map.of("CURRENT_AND", false),
+                false, 1, 0, 0, Map.of("CURRENT_COVERAGE", false),
+                0.0, 0.0, 0.0, false, false, false,
                 new EvaluationScenarioResult.GateDiagnostics.PrefixShadowDiagnostics(
                         List.of("doc"), 1.0, 1.0, true, 0.68));
         EvaluationScenarioResult result = new EvaluationScenarioResult(base.scenarioId(), base.category(),
-                base.expectedDocumentIds(), List.of(), List.of(), List.of(), base.expectedVersion(),
-                base.retrievedVersions(), base.reciprocalRank(), base.recallAt5(), true, false, true, true,
+                base.expectedDocumentIds(), List.of("doc"), List.of(), List.of(), base.expectedVersion(),
+                base.retrievedVersions(), base.reciprocalRank(), base.recallAt5(), true, true, false, true, true,
                 false, "NO_KEYWORD_MATCH", diagnostics, false);
 
         EvaluationMetrics metrics = new EvaluationMetricsCalculator().calculate(List.of(result));
@@ -63,9 +65,10 @@ class EvaluationMetricsCalculatorTest {
     private static EvaluationScenarioResult result(String id, List<String> expected, double recall, double mrr,
                                                    boolean leakage, boolean freshness, boolean citation, boolean gateCorrect) {
         return new EvaluationScenarioResult(id, EvaluationCategory.FACT_LOOKUP, expected, List.of(), List.of(), List.of(),
-                null, Map.of(), mrr, recall, gateCorrect, leakage, freshness, citation, gateCorrect, "TEST",
+                null, Map.of(), mrr, recall, gateCorrect, !expected.isEmpty(), leakage, freshness, citation, gateCorrect, "TEST",
                 new EvaluationScenarioResult.GateDiagnostics(0, 0.0, 0.0, 0.0, 0.0, false,
-                        0, 0, 0, Map.of(), new EvaluationScenarioResult.GateDiagnostics.PrefixShadowDiagnostics(
+                        0, 0, 0, Map.of(), 0.0, 0.0, 0.0, false, false, false,
+                        new EvaluationScenarioResult.GateDiagnostics.PrefixShadowDiagnostics(
                         List.of(), 0.0, 0.0, false, 0.0)), true);
     }
 }

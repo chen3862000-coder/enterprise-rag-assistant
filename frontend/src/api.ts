@@ -83,6 +83,12 @@ export const api = {
       headers: await csrfHeader(),
     })
   },
+  async restoreDocument(documentId: string) {
+    return request<void>(`/api/documents/${encodeURIComponent(documentId)}/restore`, {
+      method: 'POST',
+      headers: await csrfHeader(),
+    })
+  },
   async evaluations() {
     return request<EvaluationSummary[]>('/api/evaluations?limit=20')
   },

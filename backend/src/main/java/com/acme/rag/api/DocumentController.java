@@ -105,6 +105,15 @@ public class DocumentController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/{documentId}/restore")
+    public ResponseEntity<Void> restore(@PathVariable String documentId) {
+        identity.requireDocumentAdmin();
+        if (!documents.restore(documentId)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.noContent().build();
+    }
+
     private static Set<String> roles(String roleCsv) {
         if (roleCsv == null || roleCsv.isBlank()) {
             throw new com.acme.rag.document.ingestion.IngestionException(

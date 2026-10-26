@@ -95,10 +95,13 @@ class DocumentVersionRepository {
 
     private VersionReservation reserveLocked(ValidatedUpload upload, String contentHash, UUID versionId, UUID jobId) {
         lockDocumentKey(upload.documentId());
-        Optional<String> document = client.sql("SELECT id FROM documents WHERE id = :id FOR UPDATE")
+        Optional<String> documentStatus = client.sql("SELECT status FROM documents WHERE id = :id FOR UPDATE")
                 .param("id", upload.documentId()).query(String.class).optional();
-        if (document.isEmpty()) {
+        if (documentStatus.isEmpty()) {
             createDocument(upload);
+        } else if (!"ACTIVE".equals(documentStatus.get())) {
+            throw new IngestionException(IngestionException.Kind.CONFLICT,
+                    "Restore the inactive document before uploading or reindexing it");
         }
         Optional<ExistingVersion> existing = findReusableVersion(upload.documentId(), contentHash);
         if (existing.isPresent()) {

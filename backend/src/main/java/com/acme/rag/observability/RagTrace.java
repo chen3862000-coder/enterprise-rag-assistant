@@ -21,4 +21,5 @@ public record RagTrace(
         String groundingStatus,
         String status,
         String errorCategory,
+        String responseMode,
         Instant createdAt) {}

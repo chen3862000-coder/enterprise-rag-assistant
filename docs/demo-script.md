@@ -14,7 +14,7 @@ Use the synthetic Acme Enterprise corpus and local Compose stack. For determinis
 2. **Permission isolation, 60 seconds:** Ask about HR leave as Bob, then ask the same question as Alice. Bob may retrieve HR evidence; Alice should get `INSUFFICIENT_EVIDENCE` and no citations. As Alice, try the copied Bob source chunk ID; it should not resolve.
 3. **Same-content ACL revocation, 60 seconds:** As Carol, re-upload identical HR content under the same logical document ID but narrow/change allowed roles. Confirm the duplicate result creates no embedding/version work but updates metadata/ACL; then verify the revoked role can no longer retrieve the chunk.
 4. **Version freshness, 60 seconds:** Reindex changed current policy content under its logical ID. Confirm only the new active version is retrieved; the former version is superseded.
-5. **Measured evaluation, 60 seconds:** Run Carol's 56-scenario offline suite. Show persisted retrieval Recall@5/MRR separately from ACL leakage, freshness, citation-ID validation, evidence-gate accuracy, candidate score diagnostics, diagnostic-only gate ablations, and the in-memory Nomic prefix shadow. State clearly that shadow/ablation paths do not change runtime chat behavior and this is not generated-answer accuracy or LLM abstention accuracy.
+5. **Measured evaluation, 60 seconds:** Run Carol's 63-scenario offline suite. Show persisted retrieval Recall@5/MRR separately from ACL leakage, freshness, citation-ID validation, evidence-gate accuracy, candidate score diagnostics, diagnostic-only gate ablations, and the in-memory Nomic prefix shadow. State clearly that shadow/ablation paths do not change runtime chat behavior and this is not generated-answer accuracy or LLM abstention accuracy.
 
 ## Limits to State
 

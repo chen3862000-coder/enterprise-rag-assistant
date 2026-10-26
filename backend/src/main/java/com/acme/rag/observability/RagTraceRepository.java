@@ -24,13 +24,14 @@ public class RagTraceRepository {
                 INSERT INTO rag_traces (id, user_id, query_hash, retrieval_duration_ms, generation_duration_ms,
                     total_duration_ms, vector_candidate_count, keyword_candidate_count, exact_candidate_count,
                     context_chunk_count, citation_count, evidence_sufficient, evidence_gate_reason,
-                    model_provider, model_id, grounding_status, status, error_category, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    model_provider, model_id, grounding_status, status, error_category, response_mode, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, trace.id(), trace.userId(), queryHash, trace.retrievalDurationMs(), trace.generationDurationMs(),
                 trace.totalDurationMs(), trace.vectorCandidateCount(), trace.keywordCandidateCount(),
                 trace.exactCandidateCount(), trace.contextChunkCount(), trace.citationCount(), trace.evidenceSufficient(),
                 trace.evidenceGateReason(), trace.modelProvider(),
-                trace.modelId(), trace.groundingStatus(), trace.status(), trace.errorCategory(), Timestamp.from(trace.createdAt()));
+                trace.modelId(), trace.groundingStatus(), trace.status(), trace.errorCategory(), trace.responseMode(),
+                Timestamp.from(trace.createdAt()));
     }
 
     public Optional<RagTrace> find(UUID id, String requestedBy, boolean admin) {
@@ -38,7 +39,7 @@ public class RagTraceRepository {
                 SELECT id, user_id, retrieval_duration_ms, generation_duration_ms, total_duration_ms,
                     vector_candidate_count, keyword_candidate_count, exact_candidate_count, context_chunk_count,
                     citation_count, evidence_sufficient, evidence_gate_reason, model_provider, model_id,
-                    grounding_status, status, error_category, created_at
+                    grounding_status, status, error_category, response_mode, created_at
                 FROM rag_traces WHERE id = :id
                 """ + (admin ? "" : " AND user_id = :requestedBy");
         var query = client.sql(select).param("id", id);
@@ -57,7 +58,7 @@ public class RagTraceRepository {
                 rs.getInt("context_chunk_count"), rs.getInt("citation_count"), rs.getBoolean("evidence_sufficient"),
                 rs.getString("evidence_gate_reason"), rs.getString("model_provider"),
                 rs.getString("model_id"), rs.getString("grounding_status"), rs.getString("status"),
-                rs.getString("error_category"), rs.getTimestamp("created_at").toInstant());
+                rs.getString("error_category"), rs.getString("response_mode"), rs.getTimestamp("created_at").toInstant());
     }
 
     public Optional<String> queryHash(UUID id) {

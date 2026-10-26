@@ -79,7 +79,7 @@ class EvaluationTracePersistenceIT {
         UUID id = UUID.randomUUID();
         RagTrace failed = new RagTrace(id, "alice", 3, 0, 3, 0, 0, 0, 0, 0,
                 false, "NO_AUTHORIZED_CANDIDATES", "none", "none", "INSUFFICIENT_EVIDENCE",
-                "FAILED", "RETRIEVAL_STORAGE_ERROR", Instant.now());
+                "FAILED", "RETRIEVAL_STORAGE_ERROR", "RETRIEVAL_ONLY", Instant.now());
         traces.save(failed, "c".repeat(64));
 
         assertThat(traces.find(id, "alice", false)).get()
@@ -92,15 +92,16 @@ class EvaluationTracePersistenceIT {
         Instant now = Instant.now();
         EvaluationScenarioResult scenario = new EvaluationScenarioResult("rag-001", EvaluationCategory.FACT_LOOKUP,
                 List.of("doc-policy"), List.of("doc-policy"), List.of(), List.of(), 2, Map.of("doc-policy", 2),
-                1.0, 1.0, true, false, true, true, true, "EXACT_IDENTIFIER_MATCH",
+                1.0, 1.0, true, true, false, true, true, true, "EXACT_IDENTIFIER_MATCH",
                 new EvaluationScenarioResult.GateDiagnostics(1, 0.8, 0.02, 0.8, 0.02, true,
-                        1, 1, 1, Map.of("CURRENT_AND", true),
+                         1, 1, 1, Map.of("CURRENT_COVERAGE", true),
+                         0.35, 0.8, 0.8, false, false, false,
                         new EvaluationScenarioResult.GateDiagnostics.PrefixShadowDiagnostics(
                                 List.of("doc-policy"), 1.0, 1.0, true, 0.8)), true);
         EvaluationRunResult run = new EvaluationRunResult(UUID.randomUUID(), "dataset-v1", "OFFLINE_RETRIEVAL",
                 "test-embedding", Map.of("candidateDepth", 10), 1,
-                new EvaluationMetrics(1.0, 1.0, 0, 1.0, 1.0, 1.0,
-                        Map.of("CURRENT_AND", new EvaluationMetrics.GateAblationMetrics(1, 0, 0, 0, 1.0, 0.0, 0.0)),
+                new EvaluationMetrics(1.0, 1.0, 0, 1.0, 1.0, 1.0, 0.0, 0.0, true,
+                        Map.of("CURRENT_COVERAGE", new EvaluationMetrics.GateAblationMetrics(1, 0, 0, 0, 1.0, 0.0, 0.0)),
                         new EvaluationMetrics.PrefixShadowMetrics(true, 1.0, 1.0, 1.0, 0, 0)),
                 "SUCCEEDED", now, now, List.of(scenario));
 
@@ -108,14 +109,21 @@ class EvaluationTracePersistenceIT {
 
         assertThat(runs.find(run.runId(), "carol").scenarios()).containsExactly(scenario);
         assertThat(runs.find(run.runId(), "carol").metrics().gateAblationMetrics())
-                .containsEntry("CURRENT_AND", new EvaluationMetrics.GateAblationMetrics(1, 0, 0, 0, 1.0, 0.0, 0.0));
+                .containsEntry("CURRENT_COVERAGE", new EvaluationMetrics.GateAblationMetrics(1, 0, 0, 0, 1.0, 0.0, 0.0));
         assertThat(runs.find(run.runId(), "carol").metrics().prefixShadowMetrics().available()).isTrue();
-        assertThat(runs.recent(10)).extracting(summary -> summary.requestedBy()).contains("carol");
+        assertThat(runs.find(run.runId(), "carol").metrics())
+                .extracting(EvaluationMetrics::evidenceGateFalseAbstentionRate,
+                        EvaluationMetrics::evidenceGateFalseAdmissionRate, EvaluationMetrics::releaseQualityPassed)
+                .containsExactly(0.0, 0.0, true);
+        assertThat(runs.find(run.runId(), "carol").scenarios().getFirst().gateDiagnostics())
+                .isEqualTo(scenario.gateDiagnostics());
+        assertThat(runs.recent(10)).filteredOn(summary -> summary.requestedBy().equals("carol"))
+                .singleElement().satisfies(summary -> assertThat(summary.metrics().releaseQualityPassed()).isTrue());
     }
 
     private static RagTrace trace(UUID id, String username) {
         Instant now = Instant.now();
         return new RagTrace(id, username, 10, 20, 30, 4, 3, 1, 5, 2, true, "LEXICAL_AND_RELEVANCE_MATCH",
-                "deepseek", "deepseek-chat", "CITATIONS_PRESENT", "SUCCEEDED", null, now);
+                "deepseek", "deepseek-chat", "CITATIONS_PRESENT", "SUCCEEDED", null, "GENERATED", now);
     }
 }

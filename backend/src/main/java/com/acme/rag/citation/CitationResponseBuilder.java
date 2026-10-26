@@ -34,6 +34,16 @@ public final class CitationResponseBuilder {
         return new ValidatedAnswer(sanitized.toString().strip(), citations, "CITATIONS_PRESENT");
     }
 
+    public ValidatedAnswer retrievalOnly(List<CitationEvidence> supplied) {
+        List<Citation> citations = supplied.stream().map(this::toCitation).toList();
+        if (citations.isEmpty()) {
+            return new ValidatedAnswer("Insufficient authorized evidence was found.", List.of(),
+                    "INSUFFICIENT_EVIDENCE");
+        }
+        return new ValidatedAnswer("Retrieval-only mode: answer generation is disabled. Review these authorized sources.",
+                citations, "RETRIEVAL_ONLY");
+    }
+
     public boolean hasInvalidCitations(String answer, List<CitationEvidence> supplied) {
         java.util.Set<String> validIds = supplied.stream().map(CitationEvidence::citationId)
                 .collect(java.util.stream.Collectors.toSet());

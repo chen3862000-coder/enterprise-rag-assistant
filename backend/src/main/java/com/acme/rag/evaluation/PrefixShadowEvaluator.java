@@ -43,7 +43,7 @@ public final class PrefixShadowEvaluator {
             float[] queryVector = embeddings.embed(QUERY_PREFIX + scenario.query());
             List<RankedChunk> ranked = rank(documents, queryVector);
             EvidenceSufficiencyGate.Decision decision = gate.evaluate(scenario.query(), ranked,
-                    Set.copyOf(scenario.expectedDocumentIds()));
+                    Set.copyOf(scenario.expectedDocumentIds()), roles);
             List<String> rankedDocumentIds = ranked.stream().map(RankedChunk::documentId).distinct().toList();
             Set<String> topFive = new HashSet<>(rankedDocumentIds.stream().limit(5).toList());
             int relevantTopFive = (int) scenario.expectedDocumentIds().stream().filter(topFive::contains).count();

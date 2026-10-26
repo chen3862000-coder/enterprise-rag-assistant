@@ -19,6 +19,7 @@ public final class EvaluationMetricsCalculator {
                 freshness.isEmpty() ? 0.0 : accuracy(freshness.stream().map(EvaluationScenarioResult::freshnessCorrect).toList()),
                 accuracy(results.stream().map(EvaluationScenarioResult::citationIdValidationCorrect).toList()),
                 accuracy(results.stream().map(EvaluationScenarioResult::evidenceGateCorrect).toList()),
+                gateFalseAbstentionRate(results), gateFalseAdmissionRate(results), releaseQualityPassed(results),
                 gateAblationAccuracy(results), prefixShadowMetrics(results));
     }
 
@@ -32,7 +33,8 @@ public final class EvaluationMetricsCalculator {
 
     private static java.util.Map<String, EvaluationMetrics.GateAblationMetrics> gateAblationAccuracy(
             List<EvaluationScenarioResult> results) {
-        java.util.Set<String> policies = java.util.Set.of("CURRENT_AND", "VECTOR_ONLY", "KEYWORD_ONLY", "RELAXED_AND");
+        java.util.Set<String> policies = java.util.Set.of("CURRENT_COVERAGE", "VECTOR_ONLY",
+                "LEXICAL_COVERAGE_ONLY", "COVERAGE_030", "COVERAGE_040");
         return policies.stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
                 policy -> policy,
                 policy -> ablationMetrics(results, policy)));
@@ -73,6 +75,37 @@ public final class EvaluationMetricsCalculator {
 
     private static double rate(int numerator, int denominator) {
         return denominator == 0 ? 0.0 : (double) numerator / denominator;
+    }
+
+    private static double gateFalseAbstentionRate(List<EvaluationScenarioResult> results) {
+        List<EvaluationScenarioResult> positive = results.stream()
+                .filter(result -> result.expectedEvidenceGate() && result.expectedRelevantCandidate()).toList();
+        return positive.isEmpty() ? 0.0 : rate((int) positive.stream()
+                .filter(result -> !gatePredictedPass(result)).count(), positive.size());
+    }
+
+    private static double gateFalseAdmissionRate(List<EvaluationScenarioResult> results) {
+        List<EvaluationScenarioResult> negative = results.stream()
+                .filter(result -> !result.expectedEvidenceGate() || !result.expectedRelevantCandidate()).toList();
+        return negative.isEmpty() ? 0.0 : rate((int) negative.stream()
+                .filter(EvaluationMetricsCalculator::gatePredictedPass).count(), negative.size());
+    }
+
+    private static boolean releaseQualityPassed(List<EvaluationScenarioResult> results) {
+        double falseAbstentionRate = gateFalseAbstentionRate(results);
+        double falseAdmissionRate = gateFalseAdmissionRate(results);
+        boolean enoughPositiveCases = results.stream()
+                .filter(result -> result.expectedEvidenceGate() && result.expectedRelevantCandidate()).count() >= 10;
+        boolean enoughNegativeCases = results.stream()
+                .filter(result -> !result.expectedEvidenceGate() || !result.expectedRelevantCandidate()).count() >= 10;
+        return results.stream().noneMatch(EvaluationScenarioResult::aclLeakage)
+                && enoughPositiveCases && enoughNegativeCases
+                && falseAbstentionRate <= com.acme.rag.retrieval.EvidenceSufficiencyGate.RELEASE_MAX_FALSE_ABSTENTION_RATE
+                && falseAdmissionRate <= com.acme.rag.retrieval.EvidenceSufficiencyGate.RELEASE_MAX_FALSE_ADMISSION_RATE;
+    }
+
+    private static boolean gatePredictedPass(EvaluationScenarioResult result) {
+        return result.expectedEvidenceGate() == result.evidenceGateCorrect();
     }
 
     private static EvaluationMetrics.PrefixShadowMetrics prefixShadowMetrics(List<EvaluationScenarioResult> results) {

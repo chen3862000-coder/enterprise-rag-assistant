@@ -177,10 +177,11 @@ class EvaluationScenarioEvaluatorTest {
         when(retrieval.retrieveForEvaluation("known policy", Set.of("ENGINEERING"), Set.of("doc-policy")))
                 .thenReturn(new RetrievalResult(List.of(), 1, 0, 0, false, "NO_STRONG_EVIDENCE", 1,
                         List.of(candidate), new com.acme.rag.retrieval.EvidenceSufficiencyGate.Diagnostic(
-                        1, candidate.vectorSimilarity(), candidate.keywordScore(), candidate.vectorSimilarity(),
-                        candidate.keywordScore(), false, 1, 0, 0,
-                        java.util.Map.of("CURRENT_AND", false, "VECTOR_ONLY", true,
-                                "KEYWORD_ONLY", false, "RELAXED_AND", false))));
+                         1, candidate.vectorSimilarity(), candidate.keywordScore(), candidate.vectorSimilarity(),
+                         candidate.keywordScore(), false, 1, 0, 0,
+                         java.util.Map.of("CURRENT_COVERAGE", false, "VECTOR_ONLY", true,
+                                  "LEXICAL_COVERAGE_ONLY", false, "COVERAGE_030", false, "COVERAGE_040", false),
+                            0.35, 0.1, 0.0, false, false, false)));
         DemoRoleResolver roleResolver = mock(DemoRoleResolver.class);
         when(roleResolver.rolesFor("alice")).thenReturn(Set.of("ENGINEERING"));
         EvaluationScenario scenario = new EvaluationScenario("false-abstention", EvaluationCategory.FACT_LOOKUP,
@@ -203,7 +204,8 @@ class EvaluationScenarioEvaluatorTest {
 
     private static RetrievalResult result(List<RankedChunk> chunks, boolean sufficient, String reason) {
         return new RetrievalResult(chunks, 1, 1, 0, sufficient, reason, chunks.size(), chunks,
-                new com.acme.rag.retrieval.EvidenceSufficiencyGate.Diagnostic(chunks.size(), 0.9, 0.5,
-                        0.9, 0.5, false, 1, 1, 1, java.util.Map.of("CURRENT_AND", sufficient)));
+                 new com.acme.rag.retrieval.EvidenceSufficiencyGate.Diagnostic(chunks.size(), 0.9, 0.5,
+                         0.9, 0.5, false, 1, 1, 1, java.util.Map.of("CURRENT_COVERAGE", sufficient),
+                            0.35, 0.5, 0.5, false, false, false));
     }
 }

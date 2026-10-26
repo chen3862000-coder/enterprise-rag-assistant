@@ -19,7 +19,7 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 @Component
 public final class EvaluationDatasetLoader {
-    public static final String DATASET_VERSION = "2026-10-p1-v4";
+    public static final String DATASET_VERSION = "2026-10-p1-v5";
     private final ObjectMapper mapper;
 
     @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "ObjectMapper is a shared Spring service dependency; this loader exposes no mapper reference")
@@ -49,8 +49,8 @@ public final class EvaluationDatasetLoader {
         for (EvaluationScenario scenario : scenarios) {
             validateScenario(scenario, ids);
         }
-        if (scenarios.size() != 56) {
-            throw new IllegalStateException("Expected 56 evaluation scenarios, found " + scenarios.size());
+        if (scenarios.size() != 63) {
+            throw new IllegalStateException("Expected 63 evaluation scenarios, found " + scenarios.size());
         }
         Map<EvaluationCategory, Long> counts = scenarios.stream()
                 .collect(Collectors.groupingBy(EvaluationScenario::category, Collectors.counting()));
@@ -58,10 +58,10 @@ public final class EvaluationDatasetLoader {
                 EvaluationCategory.FACT_LOOKUP, 12L,
                 EvaluationCategory.MULTI_DOCUMENT_QA, 8L,
                 EvaluationCategory.KEYWORD_EXACT_MATCH, 8L,
-                EvaluationCategory.PERMISSION_ISOLATION, 10L,
+                EvaluationCategory.PERMISSION_ISOLATION, 12L,
                 EvaluationCategory.UNANSWERABLE, 8L,
                 EvaluationCategory.DOCUMENT_FRESHNESS, 6L,
-                EvaluationCategory.HARD_NEGATIVE, 4L);
+                EvaluationCategory.HARD_NEGATIVE, 9L);
         if (!counts.equals(expected)) {
             throw new IllegalStateException("Evaluation scenario category counts do not match the dataset specification");
         }

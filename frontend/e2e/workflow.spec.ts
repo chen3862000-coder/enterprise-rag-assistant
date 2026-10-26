@@ -10,12 +10,11 @@ test('demo login, ACL-aware chat/source, upload/versioning, trace, and evaluatio
 
   await expect(page.getByRole('heading', { name: /Answers that know/ })).toHaveCount(0)
   await page.getByRole('button', { name: /Enterprise API rate limit/ }).click()
-  await expect(page.getByRole('button', { name: /View retrieval trace/ })).toBeVisible({ timeout: 15_000 })
-  const firstCitation = page.locator('.citation-chip').first()
-  if (await firstCitation.count()) {
-    await firstCitation.click()
-    await expect(page.getByText(/SOURCE EVIDENCE/)).toBeVisible()
-  }
+  await expect(page.locator('.message.assistant')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.citation-chip')).not.toHaveCount(0)
+  await page.locator('.citation-chip').first().click()
+  await expect(page.getByText(/SOURCE EVIDENCE/)).toBeVisible()
+  await expect(page.locator('.source-text')).not.toBeEmpty()
 
   await page.getByRole('button', { name: 'Knowledge' }).click()
   await page.getByRole('button', { name: 'Add document' }).click()

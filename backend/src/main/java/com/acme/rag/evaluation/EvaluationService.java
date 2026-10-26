@@ -66,6 +66,8 @@ public class EvaluationService {
         EvaluationMetrics calculatedMetrics = new EvaluationMetrics(baseMetrics.recallAt5(),
                 baseMetrics.meanReciprocalRank(), baseMetrics.aclLeakageCount(), baseMetrics.freshnessAccuracy(),
                 baseMetrics.citationIdValidationAccuracy(), baseMetrics.evidenceGateAccuracy(),
+                baseMetrics.evidenceGateFalseAbstentionRate(), baseMetrics.evidenceGateFalseAdmissionRate(),
+                baseMetrics.releaseQualityPassed(),
                 baseMetrics.gateAblationMetrics(), new EvaluationMetrics.PrefixShadowMetrics(true, shadow.recallAt5(),
                 shadow.meanReciprocalRank(), shadow.evidenceGateAccuracy(), shadow.falseAbstentionCount(),
                 shadow.falseAdmissionCount()));
@@ -92,12 +94,19 @@ public class EvaluationService {
         configuration.put("rrfConstant", rrfConstant);
         configuration.put("minimumVectorSimilarity", minimumVectorSimilarity);
         configuration.put("minimumKeywordScore", minimumKeywordScore);
-        configuration.put("diagnosticRelaxedVectorSimilarity", EvidenceSufficiencyGate.RELAXED_VECTOR_SIMILARITY);
-        configuration.put("diagnosticRelaxedKeywordScore", EvidenceSufficiencyGate.RELAXED_KEYWORD_SCORE);
+        configuration.put("keywordQueryMode", "OR over PostgreSQL English stemmed terms");
+        configuration.put("gatePolicy", "same-chunk vector threshold + OR lexical score + adaptive term coverage + fail-closed intent/scope guards");
+        configuration.put("minimumLexicalCoverageShort", 0.30);
+        configuration.put("minimumLexicalCoverageMedium", 0.35);
+        configuration.put("minimumLexicalCoverageLong", 0.40);
+        configuration.put("releaseMaximumFalseAbstentionRate", EvidenceSufficiencyGate.RELEASE_MAX_FALSE_ABSTENTION_RATE);
+        configuration.put("releaseMaximumFalseAdmissionRate", EvidenceSufficiencyGate.RELEASE_MAX_FALSE_ADMISSION_RATE);
         configuration.put("prefixShadow", "Nomic search_query/search_document over authorized in-memory chunks");
         configuration.put("prefixShadowDocumentPrefix", "search_document: ");
         configuration.put("prefixShadowQueryPrefix", "search_query: ");
         configuration.put("prefixShadowDenseDepth", 10);
+        configuration.put("gateReleaseMaxFalseAbstentionRate", EvidenceSufficiencyGate.RELEASE_MAX_FALSE_ABSTENTION_RATE);
+        configuration.put("gateReleaseMaxFalseAdmissionRate", EvidenceSufficiencyGate.RELEASE_MAX_FALSE_ADMISSION_RATE);
         return Map.copyOf(configuration);
     }
 }

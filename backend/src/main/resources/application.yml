@@ -44,7 +44,7 @@ app:
     fused-depth: 8
     rrf-constant: 60
     minimum-vector-similarity: ${MINIMUM_VECTOR_SIMILARITY:0.35}
-    minimum-keyword-score: ${MINIMUM_KEYWORD_SCORE:0.0005}
+    minimum-keyword-score: ${MINIMUM_KEYWORD_SCORE:0.3}
     max-context-characters: 12000
   ingestion:
     max-file-bytes: 10485760

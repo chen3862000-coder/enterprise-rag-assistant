@@ -30,4 +30,13 @@ public final class CitationAccessValidator {
         }
         return new CitationResponseBuilder.ValidatedAnswer(answer.answer(), citations, answer.groundingStatus());
     }
+
+    public List<Citation> reauthorize(List<Citation> citations) {
+        Set<String> allowedChunks = new HashSet<>();
+        citations.forEach(citation -> sources.findAuthorized(citation.chunkId(), citation.documentId(), identity.allowedRoles())
+                .filter(source -> source.documentId().equals(citation.documentId())
+                        && source.version() == citation.version())
+                .ifPresent(source -> allowedChunks.add(source.chunkId())));
+        return citations.stream().filter(citation -> allowedChunks.contains(citation.chunkId())).toList();
+    }
 }

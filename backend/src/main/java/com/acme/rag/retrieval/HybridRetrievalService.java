@@ -64,7 +64,7 @@ public class HybridRetrievalService {
             exactCandidates.addAll(repository.exact(identifier, roles, candidateDepth));
         }
         List<RankedChunk> fused = fusion.fuse(List.of(vectorCandidates, keywordCandidates, exactCandidates));
-        EvidenceSufficiencyGate.Decision decision = sufficiencyGate.evaluate(query, fused, expectedDocumentIds);
+        EvidenceSufficiencyGate.Decision decision = sufficiencyGate.evaluate(query, fused, expectedDocumentIds, roles);
         return new RetrievalResult(decision.chunks(), vectorCandidates.size(), keywordCandidates.size(),
                 exactCandidates.size(), decision.sufficient(), decision.reason(), fused.size(), fused,
                 decision.diagnostic());

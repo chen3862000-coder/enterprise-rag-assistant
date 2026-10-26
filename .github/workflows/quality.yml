@@ -12,8 +12,8 @@ jobs:
   backend-quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
@@ -25,8 +25,8 @@ jobs:
   frontend-quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
@@ -42,14 +42,21 @@ jobs:
       - name: Install Chromium for browser smoke tests
         run: npx playwright install --with-deps chromium
         working-directory: frontend
+      - name: Start Compose services for E2E
+        run: docker compose up --detach --wait postgres ollama backend frontend
       - name: Run browser end-to-end tests against Compose
         run: npm run test:e2e
         working-directory: frontend
+        env:
+          E2E_COMPOSE_MANAGED: 'true'
+      - name: Stop Compose services after E2E
+        if: always()
+        run: docker compose down
 
   compose-config:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate Compose configuration
         run: docker compose config --quiet
       - name: Build application images

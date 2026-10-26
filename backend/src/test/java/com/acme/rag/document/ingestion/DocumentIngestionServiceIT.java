@@ -52,6 +52,7 @@ class DocumentIngestionServiceIT {
     }
 
     @Autowired DocumentIngestionService ingestionService;
+    @Autowired DocumentManagementRepository documentManagement;
     @Autowired JdbcTemplate jdbc;
 
     @BeforeEach
@@ -123,6 +124,33 @@ class DocumentIngestionServiceIT {
         assertThat(duplicate.metadataUpdated()).isFalse();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM ingestion_jobs WHERE document_id = ?", Integer.class,
                 request.documentId())).isEqualTo(jobsBefore);
+    }
+
+    @Test
+    void inactiveDocumentsRequireExplicitRestoreBeforeDuplicateUpload() {
+        IngestionRequest disabledRequest = request("doc-disabled-restore", "Disabled policy content");
+        ingestionService.ingest(disabledRequest);
+        assertThat(documentManagement.disable(disabledRequest.documentId())).isTrue();
+
+        assertThatThrownBy(() -> ingestionService.ingest(disabledRequest))
+                .isInstanceOf(IngestionException.class)
+                .hasMessageContaining("Restore the inactive document");
+        assertThat(jdbc.queryForObject("SELECT status FROM documents WHERE id = ?", String.class,
+                disabledRequest.documentId())).isEqualTo("DISABLED");
+
+        assertThat(documentManagement.restore(disabledRequest.documentId())).isTrue();
+        assertThat(ingestionService.ingest(disabledRequest).duplicate()).isTrue();
+
+        IngestionRequest deletedRequest = request("doc-deleted-restore", "Deleted policy content");
+        ingestionService.ingest(deletedRequest);
+        assertThat(documentManagement.delete(deletedRequest.documentId())).isTrue();
+        assertThatThrownBy(() -> ingestionService.ingest(deletedRequest))
+                .isInstanceOf(IngestionException.class)
+                .hasMessageContaining("Restore the inactive document");
+        assertThat(jdbc.queryForObject("SELECT status FROM documents WHERE id = ?", String.class,
+                deletedRequest.documentId())).isEqualTo("DELETED");
+        assertThat(documentManagement.restore(deletedRequest.documentId())).isTrue();
+        assertThat(ingestionService.ingest(deletedRequest).duplicate()).isTrue();
     }
 
     @Test

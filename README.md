@@ -16,7 +16,8 @@ All Acme Enterprise documents are synthetic and safe to publish.
 - ACL-constrained vector, PostgreSQL full-text, and exact-identifier retrieval, fused with RRF.
 - Server-issued demo sessions, role-scoped SQL retrieval, authorized source previews, and citations.
 - Staged version indexing with transactionally activated chunks and version permissions.
-- A 56-scenario deterministic offline evaluation. It measures retrieval, ACL, freshness, citation-ID validation, and the shared evidence-sufficiency gate; it does not measure generated-answer correctness.
+- Explicit restore for disabled/deleted documents; uploads cannot silently reactivate an inactive logical document.
+- A 63-scenario deterministic offline evaluation (dataset v5, including additional adversarial and permission-scope cases). It measures retrieval, ACL, freshness, citation-ID validation, and the shared evidence-sufficiency gate; it does not measure generated-answer correctness.
 - Bounded RAG traces, role-scoped trace APIs, 30-day default retention, and low-cardinality metrics.
 - React chat, knowledge-management, and evaluation workspaces.
 
@@ -75,7 +76,7 @@ The default seed path is `../synthetic-docs`; set `APP_SEED_ENABLED=true` and `A
 | `make seed` | Start/rebuild the backend with startup seeding enabled |
 | `make test` | Run backend tests, Testcontainers, analysis, and coverage gates |
 | `make frontend-test` | Run React component tests |
-| `make eval` | Sign in as Carol and run the offline 56-scenario suite (requires `jq`) |
+| `make eval` | Sign in as Carol and run the offline 63-scenario suite (requires `jq`) |
 
 Backend quality gate, on Java 21:
 
@@ -110,7 +111,7 @@ Carol’s document-management capability is separate from her retrieval scope. S
 - `GET /api/auth/csrf`, `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`
 - `POST /api/chat`
 - `GET /api/sources/{chunkId}`
-- `GET /api/documents`, `POST /api/documents`, `POST /api/documents/{id}/reindex`, `GET /api/documents/{id}/versions`, `POST /api/documents/{id}/disable`, `DELETE /api/documents/{id}` (soft delete)
+- `GET /api/documents`, `POST /api/documents`, `POST /api/documents/{id}/reindex`, `GET /api/documents/{id}/versions`, `POST /api/documents/{id}/disable`, `POST /api/documents/{id}/restore`, `DELETE /api/documents/{id}` (soft delete)
 - `POST /api/evaluations/run`, `GET /api/evaluations`, `GET /api/evaluations/{runId}`
 - `GET /api/traces/{traceId}`
 
@@ -126,17 +127,17 @@ Example response fields include `answer`, resolvable `citations`, `traceId`, and
 
 ## Evaluation and Observability
 
-The offline dataset version is `2026-10-p1-v4` (56 scenarios: baseline cases plus 4 hard negatives). Offline results use retrieval only and do not call DeepSeek. Recall@5/MRR and missing expected documents report retrieval relevance; ACL leakage, freshness, citation-ID validation, and shared evidence-gate accuracy report separate contract checks. Each fixture explicitly labels expected gate behavior. Evaluation also reports candidate-level vector/keyword diagnostics and current/vector-only/keyword-only/relaxed-threshold rule ablations; ablations are diagnostic and never alter runtime chat behavior. A separately labeled Nomic prefix shadow experiment embeds currently ACL-authorized chunks with `search_document:` and queries with `search_query:` in memory; it does not modify the active index or chat path. Citation IDs do not prove entailment, and evidence-gate accuracy is not LLM abstention or answer correctness. Thresholds are calibrated heuristics for this synthetic corpus, not universal guarantees.
+The offline dataset version is `2026-10-p1-v5` (63 scenarios; the original 56 labels are unchanged and seven adversarial/scope cases are added). Offline results use retrieval only and do not call DeepSeek. Recall@5/MRR report retrieval relevance; ACL leakage, freshness, citation-ID validation, false-abstention and false-admission rates are separate checks. Per-scenario diagnostics show vector score, OR lexical score, and meaningful query-term coverage. Release quality requires zero ACL leakage, at least 10 relevant-positive and 10 negative cases, false abstention ≤20%, and false admission ≤5%. The latest local persisted run passed: Recall@5 1.000, MRR 0.912, ACL leakage 0, freshness 1.000, gate accuracy 0.937, false abstention 11.4%, false admission 0.0%. Four positive cases were false-abstained; no negative case was admitted. This is a synthetic-corpus retrieval/gate result, not generated-answer correctness or faithfulness.
 
 Traces store a query hash and bounded timing/count/provider/status fields, not raw queries or retrieved text. Trace retention defaults to 30 days. Micrometer metrics avoid user/document/query labels. Chat persistence of a trace is best-effort so a telemetry write issue does not replace a successful answer with a failed request.
 
 ## Verification Status
 
-Verification last run locally on 2026-10-26; these outcomes describe the checked worktree only, not a permanent guarantee. Backend: `cd backend && ./mvnw clean verify` on Java 21, including unit and Testcontainers PostgreSQL/pgvector tests, PMD, SpotBugs, ArchUnit, and JaCoCo. Frontend: `cd frontend && npm ci && npm run build && npm test -- --run && npm audit --audit-level=moderate`. Browser workflows: `cd frontend && npm run test:e2e` (requires Docker Compose and Playwright Chromium). Deployment checks: `docker compose config --quiet && docker compose build backend frontend`.
+Verification last run locally on 2026-10-26; these outcomes describe the checked worktree only, not a permanent guarantee. Backend: `cd backend && ./mvnw clean verify` on Java 21 passed (59 unit tests, 31 Testcontainers PostgreSQL/pgvector integration tests, PMD, SpotBugs, ArchUnit, and JaCoCo thresholds). Frontend: `cd frontend && npm ci && npm run build && npm test -- --run && npm audit --audit-level=moderate` passed (5 tests, zero audit findings). Browser workflows: `cd frontend && npm run test:e2e` passed (3 Playwright workflows) with cold Compose startup and verified teardown. Deployment checks: `docker compose config --quiet`, `docker compose build backend frontend`, and Compose health checks passed; Flyway applied through V11 without removing volumes. GitHub Actions has not run for these uncommitted changes.
 
 Earlier Compose measurements are historical. Run the current suite with `make eval` and report its persisted results. It measures retrieval/evidence-gate behavior, not generated-answer quality.
 
-No live DeepSeek generation smoke test or browser-driven local functional test has been completed. The stack is currently configured with chat generation disabled (`CHAT_MODEL_PROVIDER=none`) and returns authorized citation IDs for inspection without a paid key. Do not infer generated-answer benchmark results from the offline suite.
+Playwright browser workflows run with `cd frontend && npm run test:e2e`. The checked Compose stack uses `CHAT_MODEL_PROVIDER=none`; live DeepSeek generation remains unverified unless an owner supplies an external API key for a smoke test. Do not infer generated-answer benchmark results from the offline suite.
 
 ## Limitations
 
@@ -149,7 +150,7 @@ No live DeepSeek generation smoke test or browser-driven local functional test h
 
 ## Portfolio Case Study
 
-See [`docs/portfolio-case-study.md`](docs/portfolio-case-study.md). The screenshot is a genuine capture of the local demo UI. No demo video has been recorded yet.
+See [`docs/portfolio-case-study.md`](docs/portfolio-case-study.md). Genuine local UI captures are available for the [knowledge workspace](frontend/docs/media/knowledge-workspace.png), [persisted evaluation](frontend/docs/media/evaluation-workspace.png), and [chat with authorized source preview](frontend/docs/media/chat-source.png). No demo video has been recorded yet.
 
 ## Future Work
 

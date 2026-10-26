@@ -15,6 +15,7 @@ public record EvaluationScenarioResult(
         double reciprocalRank,
         double recallAt5,
         boolean expectedEvidenceGate,
+        boolean expectedRelevantCandidate,
         boolean aclLeakage,
         boolean freshnessCorrect,
         boolean citationIdValidationCorrect,
@@ -35,6 +36,10 @@ public record EvaluationScenarioResult(
                                   boolean expectedExactMatch, long vectorPassingCandidateCount,
                                   long keywordPassingCandidateCount, int jointPassingCandidateCount,
                                   Map<String, Boolean> ablationDecisions,
+                                  double minimumLexicalCoverage, double bestLexicalCoverage,
+                                  double bestExpectedLexicalCoverage,
+                                  boolean sensitiveRequest, boolean intentPolicyRejection,
+                                  boolean roleScopeRejected,
                                   PrefixShadowDiagnostics prefixShadow) {
         public GateDiagnostics {
             ablationDecisions = Map.copyOf(ablationDecisions);

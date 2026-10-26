@@ -108,7 +108,7 @@ class DemoAuthenticationIT {
         MvcResult bob = login("bob");
         UUID traceId = UUID.randomUUID();
         traces.save(new RagTrace(traceId, "alice", 1, 2, 3, 1, 1, 0, 1, 1, true, "LEXICAL_AND_RELEVANCE_MATCH",
-                "deepseek", "model", "CITATIONS_PRESENT", "SUCCEEDED", null, Instant.now()), "b".repeat(64));
+                "deepseek", "model", "CITATIONS_PRESENT", "SUCCEEDED", null, "GENERATED", Instant.now()), "b".repeat(64));
 
         mvc.perform(get("/api/traces/" + traceId).session((org.springframework.mock.web.MockHttpSession) alice.getRequest().getSession(false)))
                 .andExpect(status().isOk());

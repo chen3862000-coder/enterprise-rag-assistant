@@ -34,6 +34,8 @@ public final class ReciprocalRankFusion {
                         candidate.vectorMatch() ? candidate.score() : 0.0);
                 accumulator.keywordScore = Math.max(accumulator.keywordScore,
                         candidate.keywordMatch() ? candidate.score() : 0.0);
+                accumulator.lexicalCoverage = Math.max(accumulator.lexicalCoverage,
+                        candidate.keywordMatch() ? candidate.lexicalCoverage() : 0.0);
                 accumulator.exactMatch |= candidate.exactMatch();
             }
         }
@@ -50,7 +52,7 @@ public final class ReciprocalRankFusion {
         RetrievalCandidate candidate = value.candidate;
         return new RankedChunk(candidate.chunkId(), candidate.versionId(), candidate.documentId(), candidate.title(),
                 candidate.version(), candidate.section(), candidate.text(), value.score,
-                value.vectorSimilarity, value.keywordScore, value.exactMatch);
+                value.vectorSimilarity, value.keywordScore, value.exactMatch, value.lexicalCoverage);
     }
 
     private static final class Accumulator {
@@ -58,6 +60,7 @@ public final class ReciprocalRankFusion {
         private double score;
         private double vectorSimilarity;
         private double keywordScore;
+        private double lexicalCoverage;
         private boolean exactMatch;
 
         private Accumulator(RetrievalCandidate candidate) {

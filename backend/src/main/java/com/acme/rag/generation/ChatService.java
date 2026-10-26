@@ -76,6 +76,14 @@ public class ChatService {
         }
         var context = contextAssembler.assemble(result.chunks());
         progress.contextCount = context.evidence().size();
+        if (!result.evidenceSufficient()) {
+            return insufficientEvidenceChat(message, traceId, username, createdAt, startedNanos, result,
+                    context.evidence().size(), progress.retrievalNanos);
+        }
+        if (!generator.enabled()) {
+            return retrievalOnlyChat(message, traceId, username, createdAt, startedNanos, result,
+                    context.evidence(), progress.retrievalNanos);
+        }
         long generationStarted = System.nanoTime();
         String answer;
         try {
@@ -91,19 +99,41 @@ public class ChatService {
         metrics.generation(progress.generationNanos);
         String grounding = result.evidenceSufficient() && !validated.citations().isEmpty()
                 ? "CITATIONS_PRESENT" : "INSUFFICIENT_EVIDENCE";
-        if (!generator.enabled()) {
-            validated = insufficient(result.evidenceSufficient()
-                    ? "Answer generation is disabled. Review the authorized source references above."
-                    : "Answer generation is disabled and no sufficiently relevant authorized evidence was found.");
-        } else if (!result.evidenceSufficient()) {
-            validated = insufficient("I could not find sufficiently relevant authorized evidence to answer that question.");
-        } else if (validated.citations().isEmpty()) {
+        if (validated.citations().isEmpty()) {
             validated = insufficient("Citations identify supplied sources only; no answer claim was validated.");
         }
+        grounding = validated.groundingStatus();
         var response = new ChatResponse(validated.answer(), validated.citations(), traceId, validated.groundingStatus());
         persistTrace(traceId, username, message, createdAt, progress.retrievalNanos, progress.generationNanos,
                 System.nanoTime() - startedNanos, result, context.evidence().size(), validated.citations().size(),
                 grounding, "SUCCEEDED", null);
+        return response;
+    }
+
+    private ChatResponse insufficientEvidenceChat(String message, String traceId, String username, Instant createdAt,
+                                                  long startedNanos, com.acme.rag.retrieval.RetrievalResult result,
+                                                  int contextCount, long retrievalNanos) {
+        var response = new ChatResponse(
+                "I could not find sufficiently relevant authorized evidence to answer that question.",
+                java.util.List.of(), traceId, "INSUFFICIENT_EVIDENCE");
+        persistTrace(traceId, username, message, createdAt, retrievalNanos, 0, System.nanoTime() - startedNanos,
+                result, contextCount, 0, response.groundingStatus(), "SUCCEEDED", null);
+        return response;
+    }
+
+    private ChatResponse retrievalOnlyChat(String message, String traceId, String username, Instant createdAt,
+                                          long startedNanos, com.acme.rag.retrieval.RetrievalResult result,
+                                          java.util.List<com.acme.rag.citation.CitationEvidence> evidence,
+                                          long retrievalNanos) {
+        var retrievalOnly = citations.retrievalOnly(evidence);
+        var authorized = citationAccess.reauthorize(retrievalOnly.citations());
+        boolean citationsComplete = !authorized.isEmpty() && authorized.size() == retrievalOnly.citations().size();
+        var response = citationsComplete
+                ? new ChatResponse(retrievalOnly.answer(), authorized, traceId, retrievalOnly.groundingStatus())
+                : new ChatResponse("Authorized source evidence changed during retrieval. Please retry.",
+                        java.util.List.of(), traceId, "INSUFFICIENT_EVIDENCE");
+        persistTrace(traceId, username, message, createdAt, retrievalNanos, 0, System.nanoTime() - startedNanos,
+                result, evidence.size(), authorized.size(), response.groundingStatus(), "SUCCEEDED", null);
         return response;
     }
 
@@ -137,7 +167,8 @@ public class ChatService {
                     toMillis(generationNanos), toMillis(totalNanos), retrievalResult.vectorCandidates(),
                     retrievalResult.keywordCandidates(), retrievalResult.exactCandidates(), contextCount,
                     citationCount, retrievalResult.evidenceSufficient(), retrievalResult.gateReason(),
-                    providerName(), activeModelId(), groundingStatus, status, errorCategory, createdAt),
+                    providerName(), activeModelId(), groundingStatus, status, errorCategory,
+                    generator.enabled() ? "GENERATED" : "RETRIEVAL_ONLY", createdAt),
                     ContentHasher.sha256(message.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         } catch (org.springframework.dao.DataAccessException exception) {
             org.slf4j.LoggerFactory.getLogger(ChatService.class).warn("Unable to persist RAG trace {}", traceId);

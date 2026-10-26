@@ -39,7 +39,7 @@ export function EvaluationWorkspace() {
 
   const metrics = selected?.metrics ?? runs[0]?.metrics
   return <div className="evaluation-page">
-    <div className="page-heading evaluation-heading"><div><div className="eyebrow dark"><span /> QUALITY &amp; DIAGNOSTICS</div><h1>Measure authorized retrieval.</h1><p className="muted">Deterministic retrieval and evidence-gate diagnostics; not a generated-answer benchmark.</p></div><button className="primary-button" onClick={() => void run()} disabled={running}><Play size={15} /> {running ? 'Running 56 scenarios...' : 'Run offline evaluation'}</button></div>
+    <div className="page-heading evaluation-heading"><div><div className="eyebrow dark"><span /> QUALITY &amp; DIAGNOSTICS</div><h1>Measure authorized retrieval.</h1><p className="muted">Deterministic retrieval and evidence-gate diagnostics; not a generated-answer benchmark.</p></div><button className="primary-button" onClick={() => void run()} disabled={running}><Play size={15} /> {running ? 'Running 63 scenarios...' : 'Run offline evaluation'}</button></div>
     {error && <div className="error-banner">{error}</div>}
     <div className="evaluation-method-note"><Database size={16} /><span><strong>OFFLINE RETRIEVAL EVALUATION</strong> Uses local embedding and PostgreSQL only. No paid LLM call. Gate decisions are measured by the shared runtime sufficiency policy. Citation ID validation is not factual entailment or answer faithfulness.</span></div>
     <div className="metrics-grid">
@@ -49,6 +49,8 @@ export function EvaluationWorkspace() {
       <Metric label="Freshness accuracy" value={metrics ? percent(metrics.freshnessAccuracy) : '—'} detail="Expected active version" icon={<RefreshCw size={16} />} />
       <Metric label="Citation ID validation" value={metrics ? percent(metrics.citationIdValidationAccuracy) : '—'} detail="Supplied reference IDs only; not entailment" icon={<CheckCircle2 size={16} />} />
       <Metric label="Evidence gate" value={metrics ? percent(metrics.evidenceGateAccuracy) : '—'} detail="Shared runtime gate matches fixture expectations" icon={<CircleAlert size={16} />} />
+      <Metric label="False abstention" value={metrics?.evidenceGateFalseAbstentionRate == null ? '—' : percent(metrics.evidenceGateFalseAbstentionRate)} detail="Expected-answerable retrieved candidates denied" icon={<CircleAlert size={16} />} alert={Boolean(metrics?.evidenceGateFalseAbstentionRate != null && metrics.evidenceGateFalseAbstentionRate > 0.2)} />
+      <Metric label="False admission" value={metrics?.evidenceGateFalseAdmissionRate == null ? '—' : percent(metrics.evidenceGateFalseAdmissionRate)} detail="Expected-abstention requests admitted" icon={<ShieldCheck size={16} />} alert={Boolean(metrics?.evidenceGateFalseAdmissionRate != null && metrics.evidenceGateFalseAdmissionRate > 0.05)} />
     </div>
     {metrics && Object.keys(metrics.gateAblationMetrics ?? {}).length > 0 && <div className="evaluation-method-note">
       <Activity size={16} /><span><strong>DIAGNOSTIC ABLATIONS</strong> Not applied to chat. {Object.entries(metrics.gateAblationMetrics).map(([policy, score]) => score.falseAbstention !== null && score.falseAdmission !== null
@@ -59,6 +61,7 @@ export function EvaluationWorkspace() {
       <Activity size={16} /><span><strong>NOMIC PREFIX SHADOW</strong> Not used for chat. Paired `search_query:` / `search_document:` cosine retrieval: Recall@5 {percent(metrics.prefixShadowMetrics.recallAt5)}, MRR {metrics.prefixShadowMetrics.meanReciprocalRank.toFixed(3)}, vector-gate accuracy {percent(metrics.prefixShadowMetrics.vectorGateAccuracy)}, false abstentions {metrics.prefixShadowMetrics.falseAbstentionCount}, false admissions {metrics.prefixShadowMetrics.falseAdmissionCount}.</span>
     </div>}
     {selected && <p className="metric-footnote">The active gate must agree with `shouldPassEvidenceGate`. `shouldAbstain` is retained as the customer-facing contract expectation.</p>}
+    {metrics && <p className="metric-footnote">Release quality: {metrics.releaseQualityPassed == null ? 'UNAVAILABLE (historical run)' : metrics.releaseQualityPassed ? 'PASS' : 'FAIL'}; requires zero ACL leakage, at least 10 positive and 10 negative cases, false abstention at most 20%, and false admission at most 5%.</p>}
     {selected && <p className="metric-footnote">Gate/ACL/freshness contract checks are shown in scenario pass status. Recall and MRR remain separate retrieval measurements; a low retrieval score can fail retrieval without implying an ACL bypass.</p>}
     <div className="evaluation-columns">
       <section className="runs-card"><div className="section-card-heading"><div><h2>Evaluation runs</h2><p>Persisted measurements from the configured dataset</p></div><button className="icon-button" onClick={() => void refresh()} aria-label="Refresh runs"><RefreshCw size={16} /></button></div>
@@ -79,7 +82,7 @@ export function EvaluationWorkspace() {
               <div><span className="failure-id">{scenario.scenarioId}</span><span className="failure-category">{scenario.category}</span></div>
               <p>{scenario.aclLeakage ? `ACL leakage: ${scenario.forbiddenDocumentIds.join(', ')}`
                 : `${scenario.passed ? 'Retrieval relevance miss' : `Contract check failed: gate=${scenario.gateReason}`}; missing expected candidates=${scenario.missingDocumentIds.join(', ') || 'none'}`}</p>
-              <small>Expected chunk signals: cosine {scenario.gateDiagnostics.bestExpectedVectorSimilarity.toFixed(3)}, keyword {scenario.gateDiagnostics.bestExpectedKeywordScore.toFixed(5)}. Passing candidates: vector {scenario.gateDiagnostics.vectorPassingCandidateCount}, keyword {scenario.gateDiagnostics.keywordPassingCandidateCount}, both {scenario.gateDiagnostics.jointPassingCandidateCount}.</small>
+              <small>Candidate signals: best cosine {scenario.gateDiagnostics.bestVectorSimilarity.toFixed(3)}, OR lexical rank {scenario.gateDiagnostics.bestKeywordScore.toFixed(3)}, term coverage {scenario.gateDiagnostics.bestLexicalCoverage.toFixed(2)} / required {scenario.gateDiagnostics.minimumLexicalCoverage.toFixed(2)}. Passing candidates: vector {scenario.gateDiagnostics.vectorPassingCandidateCount}, lexical {scenario.gateDiagnostics.keywordPassingCandidateCount}, both {scenario.gateDiagnostics.jointPassingCandidateCount}. Guards: sensitive {String(scenario.gateDiagnostics.sensitiveRequest)}, intent {String(scenario.gateDiagnostics.intentPolicyRejection)}, scope {String(scenario.gateDiagnostics.roleScopeRejected)}.</small>
               <small>Prefix shadow: best cosine {scenario.gateDiagnostics.prefixShadow.bestExpectedCosine.toFixed(3)}, Recall@5 {percent(scenario.gateDiagnostics.prefixShadow.recallAt5)}, vector gate {scenario.gateDiagnostics.prefixShadow.vectorGatePassed ? 'pass' : 'abstain'}.</small>
             </div>)}
         </div> : <div className="metric-explainer">

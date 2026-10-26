@@ -47,5 +47,5 @@ The architecture demonstrates how a knowledge assistant can reduce search fricti
 
 ## Demo Media
 
-- Screenshot: [`frontend/docs/media/knowledge-workspace.png`](../frontend/docs/media/knowledge-workspace.png), captured from the local demo UI after the current worktree was deployed.
+- Screenshots: [`knowledge workspace`](../frontend/docs/media/knowledge-workspace.png), [`persisted evaluation`](../frontend/docs/media/evaluation-workspace.png), and [`chat/source preview`](../frontend/docs/media/chat-source.png), captured from the local demo UI after the current worktree was deployed.
 - Demo video: pending recording.

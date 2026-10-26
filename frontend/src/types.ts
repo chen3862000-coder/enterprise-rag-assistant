@@ -17,7 +17,7 @@ export type ChatResponse = {
   answer: string
   citations: Citation[]
   traceId: string
-  groundingStatus: 'CITATIONS_PRESENT' | 'INSUFFICIENT_EVIDENCE'
+  groundingStatus: 'CITATIONS_PRESENT' | 'RETRIEVAL_ONLY' | 'INSUFFICIENT_EVIDENCE'
 }
 
 export type SourcePreview = {
@@ -70,6 +70,9 @@ export type EvaluationMetrics = {
   freshnessAccuracy: number
   citationIdValidationAccuracy: number
   evidenceGateAccuracy: number
+  evidenceGateFalseAbstentionRate: number | null
+  evidenceGateFalseAdmissionRate: number | null
+  releaseQualityPassed: boolean | null
   gateAblationMetrics: Record<string, {
     truePass: number | null
     falseAbstention: number | null
@@ -120,6 +123,7 @@ export type EvaluationRun = EvaluationSummary & {
     citationIdValidationCorrect: boolean
     evidenceGateCorrect: boolean
     gateReason: string
+    expectedRelevantCandidate: boolean
     expectedEvidenceGate: boolean
     gateDiagnostics: {
       candidateCount: number
@@ -127,7 +131,13 @@ export type EvaluationRun = EvaluationSummary & {
       bestKeywordScore: number
       bestExpectedVectorSimilarity: number
       bestExpectedKeywordScore: number
+      minimumLexicalCoverage: number
+      bestLexicalCoverage: number
+      bestExpectedLexicalCoverage: number
       expectedExactMatch: boolean
+      sensitiveRequest: boolean
+      intentPolicyRejection: boolean
+      roleScopeRejected: boolean
       vectorPassingCandidateCount: number
       keywordPassingCandidateCount: number
       jointPassingCandidateCount: number

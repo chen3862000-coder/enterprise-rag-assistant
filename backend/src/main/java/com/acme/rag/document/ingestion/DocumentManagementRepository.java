@@ -79,4 +79,9 @@ public class DocumentManagementRepository {
         return updates.update("UPDATE documents SET status = 'DELETED', updated_at = now() WHERE id = ? AND status <> 'DELETED'",
                 documentId) == 1;
     }
+
+    public boolean restore(String documentId) {
+        return updates.update("UPDATE documents SET status = 'ACTIVE', updated_at = now() "
+                + "WHERE id = ? AND status IN ('DISABLED', 'DELETED')", documentId) == 1;
+    }
 }

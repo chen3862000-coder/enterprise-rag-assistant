@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "test": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "node ./scripts/e2e-compose.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

@@ -3,48 +3,60 @@ package com.acme.rag.retrieval;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
 public final class EvidenceSufficiencyGate {
-    private static final Pattern TECHNICAL_ID = Pattern.compile("(?U)(?=[\\p{Alnum}_./:-]*[0-9])[\\p{Alnum}_./:-]{2,}");
-    private static final Pattern NUMBERED_HTTP_STATUS = Pattern.compile("(?i)\\b(?:http|status|error|code)\\s*[-:]?\\s*[0-9]{3}\\b");
     public static final double RELAXED_VECTOR_SIMILARITY = 0.25;
-    public static final double RELAXED_KEYWORD_SCORE = 0.0001;
-    private static final java.util.Set<String> SENSITIVE_TERMS = java.util.Set.of(
-            "acquisition", "price", "salary", "credential", "credentials", "secret", "secrets",
-            "password", "passwords", "private", "token", "tokens", "key");
+    public static final double RELAXED_KEYWORD_SCORE = 0.1;
+    public static final double RELEASE_MAX_FALSE_ABSTENTION_RATE = 0.20;
+    public static final double RELEASE_MAX_FALSE_ADMISSION_RATE = 0.05;
     private final double minimumVectorSimilarity;
     private final double minimumKeywordScore;
+    private final RetrievalIntentPolicy intentPolicy = new RetrievalIntentPolicy();
 
     public EvidenceSufficiencyGate(
             @Value("${app.retrieval.minimum-vector-similarity:0.35}") double minimumVectorSimilarity,
-            @Value("${app.retrieval.minimum-keyword-score:0.0005}") double minimumKeywordScore) {
+            @Value("${app.retrieval.minimum-keyword-score:0.3}") double minimumKeywordScore) {
         this.minimumVectorSimilarity = minimumVectorSimilarity;
         this.minimumKeywordScore = minimumKeywordScore;
     }
 
     public Decision evaluate(String query, List<RankedChunk> chunks) {
-        return evaluate(query, chunks, Set.of());
+        return evaluate(query, chunks, Set.of(), Set.of("PUBLIC", "ENGINEERING", "HR", "SECURITY_ADMIN"));
     }
 
     public Decision evaluate(String query, List<RankedChunk> chunks, Set<String> expectedDocumentIds) {
+        return evaluate(query, chunks, expectedDocumentIds,
+                Set.of("PUBLIC", "ENGINEERING", "HR", "SECURITY_ADMIN"));
+    }
+
+    public Decision evaluate(String query, List<RankedChunk> chunks, Set<String> expectedDocumentIds,
+                             Set<String> authorizedRoles) {
         if (chunks.isEmpty()) {
             return new Decision(false, "NO_AUTHORIZED_CANDIDATES", List.of(),
-                    diagnostics(chunks, expectedDocumentIds, List.of(), false));
+                    diagnostics(chunks, expectedDocumentIds, List.of(), false,
+                            "NO_AUTHORIZED_CANDIDATES", RetrievalIntentPolicy.containsSensitiveTerm(query), minimumLexicalCoverage(query)));
         }
-        List<RankedChunk> exactMatches = exactIdentifierMatches(query, chunks);
+        List<RankedChunk> exactMatches = intentPolicy.exactIdentifierMatches(query, chunks);
+        String policyRejection = intentPolicy.rejection(query, exactMatches, authorizedRoles);
         boolean exactAllowed = !exactMatches.isEmpty();
+        boolean sensitiveRequest = RetrievalIntentPolicy.containsSensitiveTerm(query);
         List<RankedChunk> vectorMatches = chunks.stream()
                 .filter(chunk -> chunk.vectorSimilarity() >= minimumVectorSimilarity).toList();
         List<RankedChunk> keywordMatches = chunks.stream()
                 .filter(chunk -> chunk.keywordScore() >= minimumKeywordScore).toList();
+        double requiredCoverage = minimumLexicalCoverage(query);
         List<RankedChunk> jointMatches = chunks.stream()
                 .filter(chunk -> chunk.vectorSimilarity() >= minimumVectorSimilarity
-                        && chunk.keywordScore() >= minimumKeywordScore).toList();
-        Diagnostic diagnostic = diagnostics(chunks, expectedDocumentIds, jointMatches, exactAllowed);
+                        && chunk.keywordScore() >= minimumKeywordScore
+                        && chunk.lexicalCoverage() >= requiredCoverage).toList();
+        Diagnostic diagnostic = diagnostics(chunks, expectedDocumentIds, jointMatches, exactAllowed,
+                policyRejection, sensitiveRequest, requiredCoverage);
+        if (policyRejection != null) {
+            return new Decision(false, policyRejection, List.of(), diagnostic);
+        }
         if (!exactMatches.isEmpty()) {
             return new Decision(true, "EXACT_IDENTIFIER_MATCH", exactMatches, diagnostic);
         }
@@ -56,28 +68,48 @@ public final class EvidenceSufficiencyGate {
     }
 
     private Diagnostic diagnostics(List<RankedChunk> chunks, Set<String> expectedDocumentIds,
-                                   List<RankedChunk> jointMatches, boolean exactAllowed) {
+                                   List<RankedChunk> jointMatches, boolean exactAllowed,
+                                   String policyRejection, boolean sensitiveRequest,
+                                   double requiredCoverage) {
         List<RankedChunk> expected = chunks.stream()
                 .filter(chunk -> expectedDocumentIds.contains(chunk.documentId())).toList();
         Map<String, Boolean> ablations = Map.of(
-                "CURRENT_AND", exactAllowed || !jointMatches.isEmpty(),
+                "CURRENT_COVERAGE", policyRejection == null && (exactAllowed || !jointMatches.isEmpty()),
                 "VECTOR_ONLY", exactAllowed || chunks.stream()
                         .anyMatch(chunk -> chunk.vectorSimilarity() >= minimumVectorSimilarity),
-                "KEYWORD_ONLY", exactAllowed || chunks.stream()
-                        .anyMatch(chunk -> chunk.keywordScore() >= minimumKeywordScore),
-                "RELAXED_AND", exactAllowed || chunks.stream().anyMatch(chunk ->
-                        chunk.vectorSimilarity() >= RELAXED_VECTOR_SIMILARITY
-                                && chunk.keywordScore() >= RELAXED_KEYWORD_SCORE));
+                "LEXICAL_COVERAGE_ONLY", exactAllowed || chunks.stream().anyMatch(chunk ->
+                        chunk.keywordScore() >= minimumKeywordScore && chunk.lexicalCoverage() >= requiredCoverage),
+                "COVERAGE_030", policyRejection == null && (exactAllowed || chunks.stream().anyMatch(chunk ->
+                        chunk.vectorSimilarity() >= minimumVectorSimilarity && chunk.keywordScore() >= minimumKeywordScore
+                                && chunk.lexicalCoverage() >= 0.30)),
+                "COVERAGE_040", policyRejection == null && (exactAllowed || chunks.stream().anyMatch(chunk ->
+                        chunk.vectorSimilarity() >= minimumVectorSimilarity && chunk.keywordScore() >= minimumKeywordScore
+                                && chunk.lexicalCoverage() >= 0.40)));
         return new Diagnostic(chunks.size(), maximum(chunks, RankedChunk::vectorSimilarity),
                 maximum(chunks, RankedChunk::keywordScore), maximum(expected, RankedChunk::vectorSimilarity),
                 maximum(expected, RankedChunk::keywordScore), expected.stream().anyMatch(RankedChunk::exactMatch),
                 chunks.stream().filter(chunk -> chunk.vectorSimilarity() >= minimumVectorSimilarity).count(),
                 chunks.stream().filter(chunk -> chunk.keywordScore() >= minimumKeywordScore).count(),
-                jointMatches.size(), ablations);
+                jointMatches.size(), ablations, requiredCoverage, maximum(chunks, RankedChunk::lexicalCoverage),
+                maximum(expected, RankedChunk::lexicalCoverage), sensitiveRequest,
+                policyRejection != null && !policyRejection.startsWith("REQUIRED_"),
+                policyRejection != null && policyRejection.startsWith("REQUIRED_"));
     }
 
     private static double maximum(List<RankedChunk> chunks, java.util.function.ToDoubleFunction<RankedChunk> value) {
         return chunks.stream().mapToDouble(value).max().orElse(0.0);
+    }
+
+    private static double minimumLexicalCoverage(String query) {
+        int meaningfulTerms = (int) java.util.Arrays.stream(query.toLowerCase(java.util.Locale.ROOT)
+                .split("[^a-z0-9]+", -1)).filter(term -> term.length() > 2).distinct().count();
+        if (meaningfulTerms <= 3) {
+            return 0.30;
+        }
+        if (meaningfulTerms <= 6) {
+            return 0.35;
+        }
+        return 0.40;
     }
 
     private String rejectionReason(List<RankedChunk> chunks, List<RankedChunk> vectorMatches,
@@ -92,41 +124,6 @@ public final class EvidenceSufficiencyGate {
                 || chunk.keywordScore() >= minimumKeywordScore) ? "SPLIT_SIGNALS_NO_SINGLE_CANDIDATE" : "NO_STRONG_EVIDENCE";
     }
 
-    private static List<RankedChunk> exactIdentifierMatches(String query, List<RankedChunk> chunks) {
-        if (queryTerms(query).stream().anyMatch(SENSITIVE_TERMS::contains)) {
-            return List.of();
-        }
-        java.util.Set<String> identifiers = new java.util.HashSet<>();
-        var matcher = TECHNICAL_ID.matcher(query);
-        while (matcher.find()) {
-            String identifier = matcher.group();
-            boolean hasLetter = identifier.codePoints().anyMatch(Character::isLetter);
-            if (hasLetter || isNamedNumericCode(query, identifier)) {
-                identifiers.add(identifier.toLowerCase(java.util.Locale.ROOT));
-            }
-        }
-        if (identifiers.size() != 1) {
-            return List.of();
-        }
-        return chunks.stream().filter(RankedChunk::exactMatch)
-                .filter(chunk -> identifiers.stream().anyMatch(identifier -> containsIgnoreCase(chunk.text(), identifier)))
-                .toList();
-    }
-
-    private static java.util.Set<String> queryTerms(String query) {
-        return java.util.Arrays.stream(query.toLowerCase(java.util.Locale.ROOT).split("[^a-z0-9]+"))
-                .filter(term -> term.length() > 2).collect(java.util.stream.Collectors.toSet());
-    }
-
-    private static boolean containsIgnoreCase(String text, String value) {
-        return text.toLowerCase(java.util.Locale.ROOT).contains(value.toLowerCase(java.util.Locale.ROOT));
-    }
-
-    private static boolean isNamedNumericCode(String query, String identifier) {
-        return !identifier.codePoints().anyMatch(Character::isLetter)
-                && NUMBERED_HTTP_STATUS.matcher(query).find();
-    }
-
     public record Decision(boolean sufficient, String reason, List<RankedChunk> chunks, Diagnostic diagnostic) {
         public Decision {
             chunks = List.copyOf(chunks);
@@ -137,13 +134,23 @@ public final class EvidenceSufficiencyGate {
                              double bestExpectedVectorSimilarity, double bestExpectedKeywordScore,
                              boolean expectedExactMatch, long vectorPassingCandidateCount,
                              long keywordPassingCandidateCount, int jointPassingCandidateCount,
-                             Map<String, Boolean> ablationDecisions) {
+                             Map<String, Boolean> ablationDecisions, double minimumLexicalCoverage,
+                             double bestLexicalCoverage,
+                             double bestExpectedLexicalCoverage, boolean sensitiveRequest,
+                             boolean intentPolicyRejection, boolean roleScopeRejected) {
         public Diagnostic {
             ablationDecisions = Map.copyOf(ablationDecisions);
         }
 
         public static Diagnostic empty(int candidateCount) {
-            return new Diagnostic(candidateCount, 0.0, 0.0, 0.0, 0.0, false, 0, 0, 0, Map.of());
+            return new Diagnostic(candidateCount, 0.0, 0.0, 0.0, 0.0, false, 0, 0, 0,
+                    Map.of(), 0.0, 0.0, 0.0, false, false, false);
+        }
+
+        public static boolean releaseThresholdsMet(double falseAbstentionRate, double falseAdmissionRate,
+                                                   int aclLeakageCount) {
+            return falseAbstentionRate <= RELEASE_MAX_FALSE_ABSTENTION_RATE
+                    && falseAdmissionRate <= RELEASE_MAX_FALSE_ADMISSION_RATE && aclLeakageCount == 0;
         }
     }
 }

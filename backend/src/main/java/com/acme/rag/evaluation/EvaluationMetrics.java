@@ -9,6 +9,9 @@ public record EvaluationMetrics(
         double freshnessAccuracy,
         double citationIdValidationAccuracy,
         double evidenceGateAccuracy,
+        Double evidenceGateFalseAbstentionRate,
+        Double evidenceGateFalseAdmissionRate,
+        Boolean releaseQualityPassed,
         Map<String, GateAblationMetrics> gateAblationMetrics,
         PrefixShadowMetrics prefixShadowMetrics) {
     public EvaluationMetrics {
@@ -19,14 +22,32 @@ public record EvaluationMetrics(
                              double freshnessAccuracy, double citationIdValidationAccuracy,
                              double evidenceGateAccuracy) {
         this(recallAt5, meanReciprocalRank, aclLeakageCount, freshnessAccuracy,
-                citationIdValidationAccuracy, evidenceGateAccuracy, Map.of(), PrefixShadowMetrics.empty());
+                citationIdValidationAccuracy, evidenceGateAccuracy, null, null, null, Map.of(), PrefixShadowMetrics.empty());
     }
 
     public EvaluationMetrics(double recallAt5, double meanReciprocalRank, int aclLeakageCount,
                              double freshnessAccuracy, double citationIdValidationAccuracy,
                              double evidenceGateAccuracy, Map<String, GateAblationMetrics> gateAblationMetrics) {
         this(recallAt5, meanReciprocalRank, aclLeakageCount, freshnessAccuracy,
-                citationIdValidationAccuracy, evidenceGateAccuracy, gateAblationMetrics, PrefixShadowMetrics.empty());
+                citationIdValidationAccuracy, evidenceGateAccuracy, null, null, null,
+                gateAblationMetrics, PrefixShadowMetrics.empty());
+    }
+
+    public EvaluationMetrics(double recallAt5, double meanReciprocalRank, int aclLeakageCount,
+                             double freshnessAccuracy, double citationIdValidationAccuracy,
+                             double evidenceGateAccuracy, double falseAbstentionRate, double falseAdmissionRate,
+                             boolean releaseQualityPassed, Map<String, GateAblationMetrics> gateAblationMetrics) {
+        this(recallAt5, meanReciprocalRank, aclLeakageCount, freshnessAccuracy, citationIdValidationAccuracy,
+                evidenceGateAccuracy, falseAbstentionRate, falseAdmissionRate, releaseQualityPassed,
+                gateAblationMetrics, PrefixShadowMetrics.empty());
+    }
+
+    public EvaluationMetrics(double recallAt5, double meanReciprocalRank, int aclLeakageCount,
+                             double freshnessAccuracy, double citationIdValidationAccuracy,
+                             double evidenceGateAccuracy, Map<String, GateAblationMetrics> gateAblationMetrics,
+                             PrefixShadowMetrics prefixShadowMetrics) {
+        this(recallAt5, meanReciprocalRank, aclLeakageCount, freshnessAccuracy, citationIdValidationAccuracy,
+                evidenceGateAccuracy, null, null, null, gateAblationMetrics, prefixShadowMetrics);
     }
 
     public record GateAblationMetrics(Integer truePass, Integer falseAbstention, Integer falseAdmission,

@@ -60,12 +60,16 @@ public final class EvaluationScenarioEvaluator {
         boolean citationCorrect = citationIdsRejected;
         boolean evidenceGateCorrect = retrieved.evidenceSufficient() == scenario.evidenceGateExpected();
         var gateDiagnostic = retrieved.diagnostic();
+        boolean relevantCandidateRetrieved = scenario.expectedDocumentIds().stream().anyMatch(documentIds::contains);
         var diagnostics = new EvaluationScenarioResult.GateDiagnostics(gateDiagnostic.candidateCount(),
                 gateDiagnostic.bestVectorSimilarity(), gateDiagnostic.bestKeywordScore(),
                 gateDiagnostic.bestExpectedVectorSimilarity(), gateDiagnostic.bestExpectedKeywordScore(),
                 gateDiagnostic.expectedExactMatch(), gateDiagnostic.vectorPassingCandidateCount(),
                 gateDiagnostic.keywordPassingCandidateCount(), gateDiagnostic.jointPassingCandidateCount(),
-                gateDiagnostic.ablationDecisions(),
+                gateDiagnostic.ablationDecisions(), gateDiagnostic.minimumLexicalCoverage(),
+                gateDiagnostic.bestLexicalCoverage(),
+                gateDiagnostic.bestExpectedLexicalCoverage(), gateDiagnostic.sensitiveRequest(),
+                gateDiagnostic.intentPolicyRejection(), gateDiagnostic.roleScopeRejected(),
                 new EvaluationScenarioResult.GateDiagnostics.PrefixShadowDiagnostics(shadow.retrievedDocumentIds(),
                         shadow.recallAt5(), shadow.reciprocalRank(), shadow.evidenceGatePassed(),
                         shadow.bestExpectedCosine()));
@@ -73,7 +77,8 @@ public final class EvaluationScenarioEvaluator {
         boolean passed = !leakage && freshnessCorrect && citationCorrect && evidenceGateCorrect;
         return new EvaluationScenarioResult(scenario.id(), scenario.category(), scenario.expectedDocumentIds(),
                 documentIds, missing, forbidden, scenario.expectedVersion(), versions, reciprocalRank, recall,
-                scenario.evidenceGateExpected(), leakage, freshnessCorrect, citationCorrect, evidenceGateCorrect,
+                scenario.evidenceGateExpected(), relevantCandidateRetrieved, leakage,
+                freshnessCorrect, citationCorrect, evidenceGateCorrect,
                 retrieved.gateReason(), diagnostics, passed);
     }
 

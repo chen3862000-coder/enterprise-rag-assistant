@@ -235,6 +235,25 @@ class HybridRetrievalSecurityIT {
     }
 
     @Test
+    void syntheticSeederSkipsInactiveFixturesWithoutAbortingStartup() throws java.io.IOException {
+        String documentId = "doc-public-product-overview";
+        ingestion.ingest(new IngestionRequest(documentId, "Product overview", "PUBLIC", "PUBLIC",
+                Set.of("PUBLIC"), "product-overview.md", "Initial seeded content.".getBytes(
+                java.nio.charset.StandardCharsets.UTF_8), null));
+        jdbc.update("UPDATE documents SET status = 'DISABLED' WHERE id = ?", documentId);
+        var seeder = new SyntheticSeedRunner(ingestion, true, Path.of("../synthetic-docs"));
+
+        seeder.seedNow();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM documents WHERE id = ?", String.class, documentId))
+                .isEqualTo("DISABLED");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM document_versions WHERE document_id = ?",
+                Integer.class, documentId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM documents WHERE id = 'doc-public-support-faq'",
+                Integer.class)).isEqualTo(1);
+    }
+
+    @Test
     void concurrentFirstCreatesForSameLogicalDocumentSerializeAndAllocateVersions() throws Exception {
         String documentId = "doc-first-create-race";
         java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(2);

@@ -87,6 +87,10 @@ public class DocumentIngestionService {
         return versions.isActiveContent(documentId, ContentHasher.sha256(content));
     }
 
+    boolean isInactiveDocument(String documentId) {
+        return versions.isInactiveDocument(documentId);
+    }
+
     private List<DocumentChunk> chunk(ValidatedUpload upload) {
         DocumentParser parser = parsers.stream().filter(candidate -> candidate.supports(upload.filename()))
                 .findFirst().orElseThrow(() -> new IngestionException("No parser supports the uploaded document"));

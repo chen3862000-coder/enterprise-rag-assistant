@@ -10,10 +10,13 @@ import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 @Component
 public class SyntheticSeedRunner implements ApplicationRunner {
+    private static final Logger LOGGER = LoggerFactory.getLogger(SyntheticSeedRunner.class);
     private final DocumentIngestionService ingestionService;
     private final boolean enabled;
     private final Path root;
@@ -57,6 +60,10 @@ public class SyntheticSeedRunner implements ApplicationRunner {
         }
         String stem = filename.toString().replaceFirst("\\.[^.]+$", "");
         String documentId = logicalDocumentId(area, stem);
+        if (ingestionService.isInactiveDocument(documentId)) {
+            LOGGER.warn("Skipping inactive synthetic fixture {}; explicitly restore the document to reindex it", documentId);
+            return;
+        }
         if (isArchivedRatePolicyAlreadyIndexed(area, stem, file, documentId)) {
             return;
         }

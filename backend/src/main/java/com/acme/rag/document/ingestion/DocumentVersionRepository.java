@@ -55,6 +55,12 @@ class DocumentVersionRepository {
                 .query(Boolean.class).single());
     }
 
+    boolean isInactiveDocument(String documentId) {
+        return Boolean.TRUE.equals(client.sql("SELECT EXISTS (SELECT 1 FROM documents "
+                        + "WHERE id = :documentId AND status <> 'ACTIVE')")
+                .param("documentId", documentId).query(Boolean.class).single());
+    }
+
     void activate(String documentId, Set<String> roles, VersionReservation reservation,
                   List<DocumentChunk> chunks, List<float[]> vectors) {
         transactions.executeWithoutResult(status -> {

@@ -1,5 +1,7 @@
 # Enterprise RAG Assistant
 
+[![Verify](https://github.com/chen3862000-coder/enterprise-rag-assistant/actions/workflows/verify.yml/badge.svg)](https://github.com/chen3862000-coder/enterprise-rag-assistant/actions/workflows/verify.yml)
+
 **Enterprise knowledge. Authorized retrieval. Inspectable sources.**
 
 A portfolio MVP showing document-level authorization, active document versions, hybrid retrieval, source-authorized citations, deterministic evidence sufficiency, offline evaluation, and safe bounded traces. Citation IDs are source references, not claim-level verification. It demonstrates architecture patterns; it is **not a production-ready SaaS service**.
@@ -133,7 +135,7 @@ Traces store a query hash and bounded timing/count/provider/status fields, not r
 
 ## Verification Status
 
-Verification last run locally on 2026-10-26; these outcomes describe the checked worktree only, not a permanent guarantee. Backend: `cd backend && ./mvnw clean verify` on Java 21 passed (59 unit tests, 31 Testcontainers PostgreSQL/pgvector integration tests, PMD, SpotBugs, ArchUnit, and JaCoCo thresholds). Frontend: `cd frontend && npm ci && npm run build && npm test -- --run && npm audit --audit-level=moderate` passed (5 tests, zero audit findings). Browser workflows: `cd frontend && npm run test:e2e` passed (3 Playwright workflows) with cold Compose startup and verified teardown. Deployment checks: `docker compose config --quiet`, `docker compose build backend frontend`, and Compose health checks passed; Flyway applied through V11 without removing volumes. GitHub Actions has not run for these uncommitted changes.
+Verification last run locally on 2026-10-26; these outcomes describe the checked worktree only, not a permanent guarantee. Backend: `cd backend && ./mvnw clean verify` on Java 21 passed (59 unit tests, 32 Testcontainers PostgreSQL/pgvector integration tests, PMD, SpotBugs, ArchUnit, and JaCoCo thresholds). Frontend: `cd frontend && npm ci && npm run build && npm test -- --run && npm audit --audit-level=moderate` passed (5 tests, zero audit findings). Browser workflows: `cd frontend && npm run test:e2e` passed (3 Playwright workflows) with cold Compose startup and verified teardown. Deployment checks: `docker compose config --quiet`, `docker compose build backend frontend`, and Compose health checks passed; Flyway applied through V11 without removing volumes. The GitHub Actions `Verify` workflow has been added locally and will run these backend, frontend, browser, and Compose checks on pull requests and pushes to `main` after this change is pushed.
 
 Earlier Compose measurements are historical. Run the current suite with `make eval` and report its persisted results. It measures retrieval/evidence-gate behavior, not generated-answer quality.
 

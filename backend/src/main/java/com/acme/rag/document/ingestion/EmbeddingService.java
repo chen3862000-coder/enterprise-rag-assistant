@@ -38,11 +38,13 @@ final class EmbeddingService {
                 EmbeddingResponse response = model.embedForResponse(texts);
                 return response.getResults().stream().map(result -> result.getOutput()).toList();
             } catch (org.springframework.ai.retry.NonTransientAiException exception) {
-                throw new IngestionException("Embedding provider rejected the request", exception);
+                throw new IngestionException(IngestionException.Kind.PROVIDER_UNAVAILABLE,
+                        "Embedding provider rejected the request", exception);
             } catch (org.springframework.ai.retry.TransientAiException exception) {
                 failure = exception;
             }
         }
-        throw new IngestionException("Embedding provider failed after bounded retries", failure);
+        throw new IngestionException(IngestionException.Kind.PROVIDER_UNAVAILABLE,
+                "Embedding provider failed after bounded retries", failure);
     }
 }

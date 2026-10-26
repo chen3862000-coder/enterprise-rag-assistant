@@ -39,6 +39,12 @@ jobs:
         working-directory: frontend
       - run: npm audit --audit-level=moderate
         working-directory: frontend
+      - name: Install Chromium for browser smoke tests
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Run browser end-to-end tests against Compose
+        run: npm run test:e2e
+        working-directory: frontend
 
   compose-config:
     runs-on: ubuntu-latest
@@ -48,3 +54,8 @@ jobs:
         run: docker compose config --quiet
       - name: Build application images
         run: docker compose build backend frontend
+      - name: Verify Compose services start healthy
+        run: docker compose up --detach --wait postgres ollama backend frontend
+      - name: Stop Compose services without removing data
+        if: always()
+        run: docker compose down

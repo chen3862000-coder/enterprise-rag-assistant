@@ -35,16 +35,33 @@ public class DocumentIngestionService {
         this.metrics = metrics;
     }
 
-    @SuppressFBWarnings(value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION", justification = "Reservation failures propagate their domain exception after recording an ingestion failure metric")
     public IngestionResult ingest(IngestionRequest request) {
-        ValidatedUpload upload = validator.validate(request);
-        VersionReservation reservation;
+        ValidatedUpload upload = validate(request);
+        VersionReservation reservation = reserve(upload);
+        return finish(upload, reservation);
+    }
+
+    private ValidatedUpload validate(IngestionRequest request) {
         try {
-            reservation = versions.reserve(upload, ContentHasher.sha256(upload.content()));
+            return validator.validate(request);
+        } catch (IngestionException exception) {
+            metrics.ingestion(false);
+            throw exception;
+        }
+    }
+
+    @SuppressFBWarnings(value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+            justification = "Reservation failures retain their domain/runtime type after recording the failure metric")
+    private VersionReservation reserve(ValidatedUpload upload) {
+        try {
+            return versions.reserve(upload, ContentHasher.sha256(upload.content()));
         } catch (IngestionException | IllegalArgumentException | DataAccessException exception) {
             metrics.ingestion(false);
             throw exception;
         }
+    }
+
+    private IngestionResult finish(ValidatedUpload upload, VersionReservation reservation) {
         if (reservation.duplicate()) {
             metrics.ingestion(true);
             return duplicateResult(upload.documentId(), reservation);
@@ -62,7 +79,7 @@ public class DocumentIngestionService {
         } catch (IllegalArgumentException | DataAccessException exception) {
             versions.fail(upload.documentId(), reservation, exception);
             metrics.ingestion(false);
-            throw new IngestionException("Document indexing failed", exception);
+            throw new IngestionException(IngestionException.Kind.UNPROCESSABLE, "Document indexing failed", exception);
         }
     }
 

@@ -21,7 +21,8 @@ class AnswerGeneratorTest {
     @Test
     void returnsDeterministicAbstentionWithoutCallingProviderWhenNoEvidence() {
         ObjectProvider<ChatModel> models = mock(ObjectProvider.class);
-        String answer = new AnswerGenerator(models).generate("Question?", new AssembledContext("", List.of()));
+        String answer = new AnswerGenerator(models, "deepseek", "deepseek-chat")
+                .generate("Question?", new AssembledContext("", List.of()));
 
         assertThat(answer).contains("sufficient authorized evidence");
         org.mockito.Mockito.verify(models, never()).getIfAvailable();
@@ -38,7 +39,8 @@ class AnswerGeneratorTest {
                 new RankedChunk("chunk", UUID.randomUUID(), "doc", "Policy", 2, "Limits", "1000 per minute", 1.0,
                         0.9, 0.5, false));
 
-        String answer = new AnswerGenerator(models).generate("What is the limit?", new AssembledContext("[S1] Policy", List.of(evidence)));
+        String answer = new AnswerGenerator(models, "deepseek", "deepseek-chat")
+                .generate("What is the limit?", new AssembledContext("[S1] Policy", List.of(evidence)));
 
         assertThat(answer).isEqualTo("The limit is 1000 [S1].");
     }
@@ -51,7 +53,8 @@ class AnswerGeneratorTest {
                 new RankedChunk("chunk", UUID.randomUUID(), "doc", "Policy", 1, "Limits", "1000 per minute", 1.0,
                         0.9, 0.5, false));
 
-        String answer = new AnswerGenerator(models).generate("Question", new AssembledContext("[S1] Policy", List.of(evidence)));
+        String answer = new AnswerGenerator(models, "deepseek", "deepseek-chat")
+                .generate("Question", new AssembledContext("[S1] Policy", List.of(evidence)));
 
         assertThat(answer).contains("generation is disabled", "[S1]");
         assertThat(answer).doesNotContain("SUPPORTED", "fact-checked", "verified answer");

@@ -30,6 +30,13 @@ No business-impact or live answer-quality result is claimed here. Automated veri
 
 The implementation's relevant security evidence is concrete and testable: each vector/full-text/exact candidate SQL path joins the logical document ACL and active-version state before returning chunks; same-content uploads update the ACL transactionally without embedding work; and the shared evidence gate removes weak candidates before context assembly. `CITATIONS_PRESENT` reports authorized citation IDs only and must not be read as a claim-entailment judgment.
 
+## Before / Design / Evidence / Limitations
+
+- **Before:** employees must search fragmented documents manually and may use stale or inaccessible copies.
+- **Design:** SQL filters role permissions and active versions before candidate fusion; ingestion stages and atomically activates versions; citation/source reads reauthorize against the current identity.
+- **Evidence:** PostgreSQL integration tests exercise ACL isolation, revocation, concurrent first create, and version activation. The deterministic offline suite reports retrieval and gate diagnostics separately. These are implementation checks on synthetic data, not measured customer impact.
+- **Limitations:** demo identity selection is not authentication, application SQL predicates are not PostgreSQL RLS, the deterministic gate is heuristic, citations are not entailment, and container defaults are for local demo use only.
+
 ## Tradeoffs
 
 The demo uses fixed identities, exact vector search, local Ollama embeddings, and application-level SQL ACL predicates. Production deployment would require real identity/SSO, stronger secrets and audit handling, operational hardening, threat modeling, and infrastructure-specific reliability work.
@@ -40,5 +47,5 @@ The architecture demonstrates how a knowledge assistant can reduce search fricti
 
 ## Demo Media
 
-- Screenshot: pending capture.
+- Screenshot: [`frontend/docs/media/knowledge-workspace.png`](../frontend/docs/media/knowledge-workspace.png), captured from the local demo UI after the current worktree was deployed.
 - Demo video: pending recording.

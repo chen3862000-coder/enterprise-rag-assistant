@@ -9,6 +9,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Value;
 
 @Component
 public class AnswerGenerator {
@@ -23,13 +24,27 @@ public class AnswerGenerator {
     private static final String ABSTENTION = "I could not find sufficient authorized evidence to answer that question.";
 
     private final ObjectProvider<ChatModel> models;
+    private final String provider;
+    private final String modelId;
 
-    public AnswerGenerator(ObjectProvider<ChatModel> models) {
+    public AnswerGenerator(ObjectProvider<ChatModel> models,
+                           @Value("${spring.ai.model.chat:deepseek}") String provider,
+                           @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String modelId) {
         this.models = models;
+        this.provider = provider;
+        this.modelId = modelId;
     }
 
     public String providerName() {
-        return models.getIfAvailable() == null ? "none" : "deepseek";
+        return models.getIfAvailable() == null || "none".equalsIgnoreCase(provider) ? "none" : provider;
+    }
+
+    public String modelId() {
+        return "none".equals(providerName()) ? "none" : modelId;
+    }
+
+    public boolean enabled() {
+        return models.getIfAvailable() != null && !"none".equalsIgnoreCase(provider);
     }
 
     public String generate(String question, AssembledContext context) {
@@ -37,7 +52,7 @@ public class AnswerGenerator {
             return ABSTENTION;
         }
         ChatModel model = models.getIfAvailable();
-        if (model == null) {
+        if (model == null || "none".equalsIgnoreCase(provider)) {
             String references = context.evidence().stream().map(evidence -> "[" + evidence.citationId() + "]")
                     .collect(java.util.stream.Collectors.joining(" "));
             return "Answer generation is disabled. Review the authorized retrieved evidence: " + references;

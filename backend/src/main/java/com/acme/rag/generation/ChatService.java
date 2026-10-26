@@ -24,8 +24,6 @@ public class ChatService {
     private final RagTraceRepository traces;
     private final RagMetrics metrics;
     private final CurrentIdentity identity;
-    private final org.springframework.beans.factory.ObjectProvider<org.springframework.ai.chat.model.ChatModel> models;
-    private final String configuredModelId;
 
     @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Injected Spring service collaborators are private and not exposed")
     public ChatService(
@@ -36,9 +34,7 @@ public class ChatService {
             CitationAccessValidator citationAccess,
             RagTraceRepository traces,
             RagMetrics metrics,
-            CurrentIdentity identity,
-            org.springframework.beans.factory.ObjectProvider<org.springframework.ai.chat.model.ChatModel> models,
-            @org.springframework.beans.factory.annotation.Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String modelId) {
+            CurrentIdentity identity) {
         this.retrieval = retrieval;
         this.contextAssembler = contextAssembler;
         this.generator = generator;
@@ -47,68 +43,83 @@ public class ChatService {
         this.traces = traces;
         this.metrics = metrics;
         this.identity = identity;
-        this.models = models;
-        this.configuredModelId = modelId;
     }
 
+    @SuppressWarnings("PMD.AvoidCatchingGenericException")
     public ChatResponse chat(String message) {
         long startedNanos = System.nanoTime();
         Instant createdAt = Instant.now();
         metrics.request();
         var principal = identity.require();
         String traceId = UUID.randomUUID().toString();
+        RequestProgress progress = new RequestProgress();
         try {
-            return executeChat(message, traceId, principal.username(), createdAt, startedNanos);
-        } catch (IllegalArgumentException | org.springframework.ai.retry.NonTransientAiException
-                 | org.springframework.ai.retry.TransientAiException | org.springframework.dao.DataAccessException exception) {
-            return failedChat(message, traceId, principal.username(), createdAt, startedNanos, exception);
+            return executeChat(message, traceId, principal.username(), createdAt, startedNanos, progress);
+        } catch (RuntimeException exception) {
+            return failedChat(message, traceId, principal.username(), createdAt, startedNanos, exception, progress);
         }
     }
 
-    private ChatResponse executeChat(String message, String traceId, String username, Instant createdAt, long startedNanos) {
+    private ChatResponse executeChat(String message, String traceId, String username, Instant createdAt,
+                                     long startedNanos, RequestProgress progress) {
         long retrievalStarted = System.nanoTime();
-        var result = retrieval.retrieve(message);
-        long retrievalNanos = System.nanoTime() - retrievalStarted;
-        metrics.retrieval(retrievalNanos);
+        com.acme.rag.retrieval.RetrievalResult result;
+        try {
+            result = retrieval.retrieve(message);
+            progress.retrievalResult = result;
+        } finally {
+            progress.retrievalNanos = System.nanoTime() - retrievalStarted;
+        }
+        metrics.retrieval(progress.retrievalNanos);
         if (result.chunks().isEmpty()) {
             metrics.emptyRetrieval();
         }
         var context = contextAssembler.assemble(result.chunks());
+        progress.contextCount = context.evidence().size();
         long generationStarted = System.nanoTime();
-        String answer = generator.generate(message, context);
+        String answer;
+        try {
+            answer = generator.generate(message, context);
+        } finally {
+            progress.generationNanos = System.nanoTime() - generationStarted;
+        }
         if (citations.hasInvalidCitations(answer, context.evidence())) {
             metrics.invalidCitation();
         }
         String sanitizedAnswer = citations.stripUnsupportedCitationClaims(answer, context.evidence());
         var validated = citationAccess.reauthorize(citations.validate(sanitizedAnswer, context.evidence()));
-        long generationNanos = System.nanoTime() - generationStarted;
-        metrics.generation(generationNanos);
+        metrics.generation(progress.generationNanos);
         String grounding = result.evidenceSufficient() && !validated.citations().isEmpty()
                 ? "CITATIONS_PRESENT" : "INSUFFICIENT_EVIDENCE";
-        if ("none".equals(providerName()) && !result.evidenceSufficient()) {
-            validated = insufficient("Answer generation is disabled and no sufficiently relevant authorized evidence was found.");
+        if (!generator.enabled()) {
+            validated = insufficient(result.evidenceSufficient()
+                    ? "Answer generation is disabled. Review the authorized source references above."
+                    : "Answer generation is disabled and no sufficiently relevant authorized evidence was found.");
         } else if (!result.evidenceSufficient()) {
             validated = insufficient("I could not find sufficiently relevant authorized evidence to answer that question.");
         } else if (validated.citations().isEmpty()) {
             validated = insufficient("Citations identify supplied sources only; no answer claim was validated.");
         }
         var response = new ChatResponse(validated.answer(), validated.citations(), traceId, validated.groundingStatus());
-        persistTrace(traceId, username, message, createdAt, retrievalNanos, generationNanos,
+        persistTrace(traceId, username, message, createdAt, progress.retrievalNanos, progress.generationNanos,
                 System.nanoTime() - startedNanos, result, context.evidence().size(), validated.citations().size(),
                 grounding, "SUCCEEDED", null);
         return response;
     }
 
     private ChatResponse failedChat(String message, String traceId, String username, Instant createdAt,
-                                    long startedNanos, RuntimeException exception) {
-        var empty = new com.acme.rag.retrieval.RetrievalResult(java.util.List.of(), 0, 0, 0,
-                false, "REQUEST_FAILED", 0, java.util.List.of(),
-                com.acme.rag.retrieval.EvidenceSufficiencyGate.Diagnostic.empty(0));
+                                    long startedNanos, RuntimeException exception, RequestProgress progress) {
+        var failedRetrieval = progress.retrievalResult == null
+                ? new com.acme.rag.retrieval.RetrievalResult(java.util.List.of(), 0, 0, 0,
+                        false, "REQUEST_FAILED", 0, java.util.List.of(),
+                        com.acme.rag.retrieval.EvidenceSufficiencyGate.Diagnostic.empty(0))
+                : progress.retrievalResult;
         String grounding = "INSUFFICIENT_EVIDENCE";
         var response = new ChatResponse("The request could not be completed safely. Please retry.",
                 java.util.List.of(), traceId, grounding);
-        persistTrace(traceId, username, message, createdAt, 0, 0, System.nanoTime() - startedNanos,
-                empty, 0, 0, grounding, "FAILED", errorCategory(exception));
+        persistTrace(traceId, username, message, createdAt, progress.retrievalNanos, progress.generationNanos,
+                System.nanoTime() - startedNanos, failedRetrieval, progress.contextCount, 0,
+                grounding, "FAILED", errorCategory(exception));
         return response;
     }
 
@@ -143,7 +154,10 @@ public class ChatService {
         if (exception instanceof org.springframework.dao.DataAccessException) {
             return "RETRIEVAL_STORAGE_ERROR";
         }
-        return "INVALID_QUERY";
+        if (exception instanceof IllegalArgumentException) {
+            return "INVALID_QUERY";
+        }
+        return "INTERNAL_REQUEST_ERROR";
     }
 
     private static long toMillis(long nanos) {
@@ -151,10 +165,17 @@ public class ChatService {
     }
 
     private String providerName() {
-        return models.getIfAvailable() == null ? "none" : "deepseek";
+        return generator.providerName();
     }
 
     private String activeModelId() {
-        return "none".equals(providerName()) ? "none" : configuredModelId;
+        return generator.modelId();
+    }
+
+    private static final class RequestProgress {
+        private com.acme.rag.retrieval.RetrievalResult retrievalResult;
+        private long retrievalNanos;
+        private long generationNanos;
+        private int contextCount;
     }
 }

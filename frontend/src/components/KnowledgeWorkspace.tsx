@@ -59,7 +59,7 @@ export function KnowledgeWorkspace({ identity }: { identity: Identity }) {
       return
     }
     const file = data.get('file')
-    if (!(file instanceof File) || file.size === 0) {
+    if (typeof file === 'string' || !file || typeof file.size !== 'number' || file.size === 0) {
       setError('Choose a non-empty Markdown, text, or extractable PDF file.')
       return
     }
@@ -73,7 +73,7 @@ export function KnowledgeWorkspace({ identity }: { identity: Identity }) {
       setShowUpload(false)
       form.reset()
       await refresh()
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Upload failed') }
+    } catch (cause) { setError(uploadErrorMessage(cause)) }
     finally { setUploading(false) }
   }
 
@@ -101,4 +101,14 @@ export function KnowledgeWorkspace({ identity }: { identity: Identity }) {
       <form onSubmit={upload} className="upload-form"><label>Logical document ID <input name="documentId" placeholder="doc-engineering-api-guide" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,159}" required /></label><p className="field-note">Use a new stable ID for a new document; reuse its existing ID to create a new version. Identical content updates metadata/ACL without re-embedding.</p><label>Document title <input name="title" required maxLength={180} /></label><div className="form-two"><label>Department <select name="department"><option>PUBLIC</option><option>ENGINEERING</option><option>HR</option><option>SECURITY</option></select></label><label>Classification <select name="classification"><option>PUBLIC</option><option>INTERNAL</option><option>CONFIDENTIAL</option><option>RESTRICTED</option></select></label></div><label>Allowed roles <input name="allowedRoles" defaultValue="ENGINEERING" placeholder="ENGINEERING,HR" required /></label><label className="file-drop"><UploadCloud size={22} /><strong>Choose Markdown, plain text, or extractable PDF</strong><small>Maximum 10 MB · Scanned PDFs are unsupported</small><input name="file" type="file" accept=".md,.markdown,.txt,.pdf,text/plain,text/markdown,application/pdf" required /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowUpload(false)}>Cancel</button><button type="submit" className="primary-button" disabled={uploading}>{uploading ? <LoaderCircle size={15} className="spin" /> : <UploadCloud size={15} />} {uploading ? 'Indexing...' : 'Upload & index'}</button></div></form>
     </section></div>}
   </div>
+}
+
+export function uploadErrorMessage(cause: unknown) {
+  if (!(cause instanceof Error)) return 'Upload failed. Check the file and document details, then retry.'
+  const code = 'code' in cause ? cause.code : undefined
+  if (code === 'INGESTION_INVALID_INPUT') return `Upload rejected: ${cause.message}`
+  if (code === 'INGESTION_CONFLICT') return 'This identical document version is already being indexed. Wait for it to finish, then retry.'
+  if (code === 'INGESTION_UNPROCESSABLE') return `Document could not be indexed: ${cause.message}`
+  if (code === 'INGESTION_PROVIDER_UNAVAILABLE') return 'The embedding service is temporarily unavailable. Your active document version was not replaced; retry later.'
+  return cause.message || 'Upload failed. Check the file and document details, then retry.'
 }

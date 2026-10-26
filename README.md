@@ -6,6 +6,8 @@ A portfolio MVP showing document-level authorization, active document versions, 
 
 All Acme Enterprise documents are synthetic and safe to publish.
 
+![Knowledge workspace showing the local synthetic-document index](frontend/docs/media/knowledge-workspace.png)
+
 ## What Is Implemented
 
 - Markdown, text, and extractable-PDF ingestion; scanned PDFs/OCR are unsupported.
@@ -130,7 +132,7 @@ Traces store a query hash and bounded timing/count/provider/status fields, not r
 
 ## Verification Status
 
-Run the required backend quality gate on Java 21 using `cd backend && ./mvnw verify`; frontend checks use `cd frontend && npm ci && npm run build && npm test -- --run`. Earlier results are historical and do not verify a modified worktree. Validate Compose using `docker compose config --quiet`.
+Verification last run locally on 2026-10-26; these outcomes describe the checked worktree only, not a permanent guarantee. Backend: `cd backend && ./mvnw clean verify` on Java 21, including unit and Testcontainers PostgreSQL/pgvector tests, PMD, SpotBugs, ArchUnit, and JaCoCo. Frontend: `cd frontend && npm ci && npm run build && npm test -- --run && npm audit --audit-level=moderate`. Browser workflows: `cd frontend && npm run test:e2e` (requires Docker Compose and Playwright Chromium). Deployment checks: `docker compose config --quiet && docker compose build backend frontend`.
 
 Earlier Compose measurements are historical. Run the current suite with `make eval` and report its persisted results. It measures retrieval/evidence-gate behavior, not generated-answer quality.
 
@@ -147,7 +149,7 @@ No live DeepSeek generation smoke test or browser-driven local functional test h
 
 ## Portfolio Case Study
 
-See [`docs/portfolio-case-study.md`](docs/portfolio-case-study.md). Screenshot and demo-video placeholders remain until actual captures are made.
+See [`docs/portfolio-case-study.md`](docs/portfolio-case-study.md). The screenshot is a genuine capture of the local demo UI. No demo video has been recorded yet.
 
 ## Future Work
 

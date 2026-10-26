@@ -177,6 +177,26 @@ class HybridRetrievalSecurityIT {
     }
 
     @Test
+    void sameContentReindexReappliesAclAfterConcurrentFirstCreateUpdatesMetadata() {
+        String id = "doc-first-create-acl";
+        byte[] content = "initial content".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        ingestion.ingest(new IngestionRequest(id, "Initial", "PUBLIC", "PUBLIC", Set.of("PUBLIC"),
+                "initial.txt", content, null));
+
+        ingestion.ingest(new IngestionRequest(id, "Latest", "HR", "CONFIDENTIAL", Set.of("HR"),
+                "initial.txt", content, null));
+
+        assertThat(jdbc.queryForList("SELECT allowed_role FROM document_permissions WHERE document_id = ?",
+                String.class, id)).containsExactly("HR");
+        assertThat(documentsVersionCount(id)).isEqualTo(1);
+    }
+
+    private int documentsVersionCount(String documentId) {
+        return jdbc.queryForObject("SELECT count(*) FROM document_versions WHERE document_id = ?",
+                Integer.class, documentId);
+    }
+
+    @Test
     void versionedCorpusFreshnessScenariosResolveActiveVersionAfterOldFixtureSeedsFirst() {
         IngestionResult oldVersion = ingestion.ingest(new IngestionRequest("doc-engineering-rate-limit-configuration",
                 "Enterprise API Policy", "ENGINEERING", "INTERNAL", Set.of("ENGINEERING"), "policy-v1.md",
@@ -215,21 +235,39 @@ class HybridRetrievalSecurityIT {
     }
 
     @Test
-    void newLogicalDocumentSeedCanRaceSafelyWithConcurrentCreation() throws Exception {
+    void concurrentFirstCreatesForSameLogicalDocumentSerializeAndAllocateVersions() throws Exception {
         String documentId = "doc-first-create-race";
-        org.springframework.jdbc.core.JdbcTemplate contender = new JdbcTemplate(
-                new org.springframework.jdbc.datasource.DriverManagerDataSource(
-                        postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()));
-        ingestion.ingest(new IngestionRequest(documentId, "Seeded", "PUBLIC", "PUBLIC", Set.of("PUBLIC"),
-                "seed.txt", "seed content".getBytes(java.nio.charset.StandardCharsets.UTF_8), null));
+        java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(2);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        var first = java.util.concurrent.CompletableFuture.supplyAsync(() -> concurrentIngest(documentId,
+                "Seeded", "seed.txt", "seed content", ready, start));
+        var second = java.util.concurrent.CompletableFuture.supplyAsync(() -> concurrentIngest(documentId,
+                "Seeded v2", "seed-v2.txt", "second content", ready, start));
+        ready.await();
+        start.countDown();
+        IngestionResult firstResult = first.join();
+        IngestionResult secondResult = second.join();
 
-        IngestionResult raced = ingestion.ingest(new IngestionRequest(documentId, "Admin metadata", "HR", "CONFIDENTIAL",
-                Set.of("HR"), "seed.txt", "seed content".getBytes(java.nio.charset.StandardCharsets.UTF_8), null));
-
-        assertThat(raced.duplicate()).isTrue();
-        assertThat(contender.queryForObject("SELECT count(*) FROM documents WHERE id = ?", Integer.class, documentId)).isEqualTo(1);
+        assertThat(firstResult.version()).isNotEqualTo(secondResult.version());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM documents WHERE id = ?", Integer.class, documentId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM document_versions WHERE document_id = ?",
+                Integer.class, documentId)).isEqualTo(2);
         assertThat(jdbc.queryForList("SELECT allowed_role FROM document_permissions WHERE document_id = ?", String.class, documentId))
-                .containsExactly("HR");
+                .containsExactly("PUBLIC");
+    }
+
+    private IngestionResult concurrentIngest(String documentId, String title, String filename, String content,
+                                               java.util.concurrent.CountDownLatch ready,
+                                               java.util.concurrent.CountDownLatch start) {
+        ready.countDown();
+        try {
+            start.await();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Concurrent ingestion test interrupted", exception);
+        }
+        return ingestion.ingest(new IngestionRequest(documentId, title, "PUBLIC", "PUBLIC", Set.of("PUBLIC"),
+                filename, content.getBytes(java.nio.charset.StandardCharsets.UTF_8), null));
     }
 
     private void createDocument(String documentId, String title, String classification, String role, String text) {

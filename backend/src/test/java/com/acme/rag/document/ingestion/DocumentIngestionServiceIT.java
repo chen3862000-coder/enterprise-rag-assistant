@@ -150,7 +150,7 @@ class DocumentIngestionServiceIT {
             @Override public int dimensions() { return 2; }
         };
         DocumentIngestionService invalidEmbeddingService = new DocumentIngestionService(
-                new UploadValidator(parsers, 10_485_760),
+                new UploadValidator(new UploadContentValidator(parsers, 10_485_760)),
                 new DocumentVersionRepository(jdbc, org.springframework.jdbc.core.simple.JdbcClient.create(jdbc), transactionTemplate,
                         "bad-model", 768),
                 new EmbeddingService(wrongDimensionModel, 768),
@@ -179,7 +179,8 @@ class DocumentIngestionServiceIT {
         EmbeddingModel invalid = mock(EmbeddingModel.class);
         when(invalid.embedForResponse(org.mockito.ArgumentMatchers.<String>anyList()))
                 .thenReturn(new EmbeddingResponse(List.of(new org.springframework.ai.embedding.Embedding(new float[2], 0))));
-        DocumentIngestionService service = new DocumentIngestionService(new UploadValidator(parsers, 10_485_760),
+        DocumentIngestionService service = new DocumentIngestionService(
+                new UploadValidator(new UploadContentValidator(parsers, 10_485_760)),
                 new DocumentVersionRepository(jdbc, org.springframework.jdbc.core.simple.JdbcClient.create(jdbc),
                         new TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource())),
                         "bad-model", 768), new EmbeddingService(invalid, 768), parsers, new DocumentChunker(1800, 240),

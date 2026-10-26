@@ -8,9 +8,9 @@ This document describes the current approved architecture and supported MVP boun
 
 ## Compatibility Findings
 
-The initial dependency line is Spring Boot 4.1.2 with Spring AI 2.0.2. The Spring AI 2.0 documentation states compatibility with Spring Boot 4.0.x and 4.1.x. Spring Boot 4.1.2 requires Java 17 or later and supports Java through 27, so the requested Java 21 runtime is supported.
+The implementation uses Spring Boot 4.1.2 with Spring AI 2.0.2 and is built and tested on Java 21.
 
-Spring AI documents dedicated DeepSeek chat and Ollama embedding starters. Chat generation and embedding generation will therefore be configured independently. DeepSeek is the default online chat provider; local Ollama is the embedding provider. The candidate embedding model is `nomic-embed-text` (768 dimensions); the model identity and dimensions will be stored with each indexed version. Model availability and the actual dependency combination must be smoke-tested in the project build before being treated as verified.
+Spring AI documents dedicated DeepSeek chat and Ollama embedding starters. Chat generation is optional and configured independently from local Ollama embeddings. The active embedding model is `nomic-embed-text` (768 dimensions); model identity and dimensions are stored with each indexed version.
 
 PostgreSQL with pgvector provides cosine vector distance, exact nearest-neighbor search, and combination with PostgreSQL full-text search. Retrieval will use explicit parameterized JDBC queries rather than exposing a generic vector-store search path, so ACL predicates remain visible and testable in SQL. Exact vector search is sufficient for this small synthetic corpus and avoids approximate-index filtering/recall complications.
 
@@ -127,8 +127,8 @@ Run backend verification with `cd backend && ./mvnw verify` on Java 21; this inc
 - pgvector HNSW indexes support at most 2,000 dimensions for `vector`; the proposed 768-dimensional model fits. Exact search avoids approximate filter-recall effects for this MVP.
 - The deterministic evidence thresholds are calibrated for the small synthetic corpus. They are not a general semantic entailment guarantee and may false-abstain or pass coincidental matches on other corpora.
 - Prompt instructions and citation checks reduce risk but do not prove factual correctness or guarantee prompt-injection immunity.
-- Demo identities, local Compose secrets, and the absence of SSO, production DLP, distributed job orchestration, and formal hardening are explicit MVP simplifications.
-- New-document simultaneous first-create requests still rely on PostgreSQL primary-key uniqueness rather than a dedicated advisory lock. A losing concurrent create may return a conflict; retry it after the winning create completes.
+- Demo identities, local Compose secrets, root-running containers, floating base-image tags, and the absence of SSO, production DLP, distributed job orchestration, and formal hardening are explicit MVP limitations. Do not present Compose as production deployment guidance.
+- New-document reservations acquire a PostgreSQL transaction advisory lock keyed by logical document ID before checking or inserting the row, serializing simultaneous first creates across application instances.
 
 ## References
 

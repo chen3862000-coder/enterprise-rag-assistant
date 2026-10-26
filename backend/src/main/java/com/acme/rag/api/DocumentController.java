@@ -107,7 +107,9 @@ public class DocumentController {
 
     private static Set<String> roles(String roleCsv) {
         if (roleCsv == null || roleCsv.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one allowed role is required");
+            throw new com.acme.rag.document.ingestion.IngestionException(
+                    com.acme.rag.document.ingestion.IngestionException.Kind.INVALID_INPUT,
+                    "At least one allowed role is required");
         }
         return java.util.Arrays.stream(roleCsv.split(","))
                 .map(String::strip).filter(role -> !role.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet());

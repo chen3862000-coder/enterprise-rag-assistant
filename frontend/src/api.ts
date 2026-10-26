@@ -10,14 +10,18 @@ import type {
 } from './types'
 
 type Csrf = { token: string; headerName: string }
+export type ApiError = Error & { code?: string; status?: number }
 
 let csrf: Csrf | undefined
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { credentials: 'same-origin', ...init })
   if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || `Request failed (${response.status})`)
+    const body = await response.json().catch(() => undefined) as { code?: string; message?: string } | undefined
+    const error = new Error(body?.message || `Request failed (${response.status})`) as ApiError
+    error.code = body?.code
+    error.status = response.status
+    throw error
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
@@ -33,11 +37,13 @@ export const api = {
     return request<Identity>('/api/auth/me')
   },
   async login(username: string) {
-    return request<Identity>('/api/auth/login', {
+    const identity = await request<Identity>('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(await csrfHeader()) },
       body: JSON.stringify({ username }),
     })
+    csrf = undefined
+    return identity
   },
   async logout() {
     await request<void>('/api/auth/logout', { method: 'POST', headers: await csrfHeader() })

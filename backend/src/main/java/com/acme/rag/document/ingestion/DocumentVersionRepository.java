@@ -94,6 +94,7 @@ class DocumentVersionRepository {
     }
 
     private VersionReservation reserveLocked(ValidatedUpload upload, String contentHash, UUID versionId, UUID jobId) {
+        lockDocumentKey(upload.documentId());
         Optional<String> document = client.sql("SELECT id FROM documents WHERE id = :id FOR UPDATE")
                 .param("id", upload.documentId()).query(String.class).optional();
         if (document.isEmpty()) {
@@ -104,6 +105,11 @@ class DocumentVersionRepository {
             return reuseOrRetry(existing.get(), upload, jobId);
         }
         return createVersion(upload, contentHash, versionId, jobId);
+    }
+
+    private void lockDocumentKey(String documentId) {
+        client.sql("SELECT pg_advisory_xact_lock(hashtextextended(:documentId, 0))")
+                .param("documentId", documentId).query((rs, row) -> rs.getObject(1)).single();
     }
 
     private void createDocument(ValidatedUpload upload) {
@@ -130,7 +136,8 @@ class DocumentVersionRepository {
 
     private VersionReservation reuseOrRetry(ExistingVersion existing, ValidatedUpload upload, UUID newJobId) {
         if (STATUS_INDEXING.equals(existing.status())) {
-            throw new IngestionException("An identical document version is already being indexed");
+            throw new IngestionException(IngestionException.Kind.CONFLICT,
+                    "An identical document version is already being indexed");
         }
         if (STATUS_FAILED.equals(existing.status())) {
             jdbc.update("UPDATE document_versions SET index_status = 'INDEXING' WHERE id = ?", existing.versionId());

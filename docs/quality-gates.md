@@ -8,7 +8,7 @@ The supported local quality command is `cd backend && ./mvnw verify` using Java 
 - PMD uses the focused ruleset in `backend/config/pmd-ruleset.xml`. It rejects classes above 300 NCSS, methods above 40 NCSS, excessive method counts, high cyclomatic/cognitive complexity, deeply nested conditionals, god classes, generic exception catches, missing control-flow braces, and `instanceof` branching inside catch blocks.
 - SpotBugs runs at maximum effort and low threshold; any finding fails the build. Suppressions must be narrowly scoped and justified next to the code.
 - JaCoCo rejects bundle class coverage or method coverage below 70%. Reports are generated under `backend/target/site/jacoco/`.
-- ArchUnit rejects package dependency cycles and guards API/transport packages from depending on JDBC or persistence/repository implementations. Rules allow an empty API package while the API module is not yet implemented; as that package is added, violations become active automatically.
+- ArchUnit rejects package dependency cycles and guards API/transport packages from depending on JDBC or persistence/repository implementations.
 
 ## Agent Review Contract
 

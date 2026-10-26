@@ -32,7 +32,7 @@ public class PdfDocumentParser implements DocumentParser {
                 throw new IllegalArgumentException("PDF contains no extractable text; scanned PDFs are unsupported");
             }
             return new ParsedDocument(sections);
-        } catch (IOException e) {
+    } catch (IOException e) {
             throw new IllegalArgumentException("Unable to parse PDF document", e);
         }
     }

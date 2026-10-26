@@ -204,7 +204,10 @@ class DemoAuthenticationIT {
                         .param("title", "Bad file").param("department", "PUBLIC")
                         .param("classification", "PUBLIC").param("allowedRoles", "PUBLIC"))
                 .andExpect(status().isBadRequest())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value("INVALID_REQUEST"));
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code")
+                        .value("INGESTION_INVALID_INPUT"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.message")
+                        .value("Only Markdown, plain text, and PDF files are supported"));
     }
 
     private MvcResult login(String username) throws Exception {

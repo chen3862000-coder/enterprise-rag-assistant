@@ -70,6 +70,23 @@ export type EvaluationMetrics = {
   freshnessAccuracy: number
   citationIdValidationAccuracy: number
   evidenceGateAccuracy: number
+  gateAblationMetrics: Record<string, {
+    truePass: number | null
+    falseAbstention: number | null
+    falseAdmission: number | null
+    trueAbstention: number | null
+    accuracy: number
+    falseAbstentionRate: number | null
+    falseAdmissionRate: number | null
+  }>
+  prefixShadowMetrics: {
+    available: boolean
+    recallAt5: number
+    meanReciprocalRank: number
+    vectorGateAccuracy: number
+    falseAbstentionCount: number
+    falseAdmissionCount: number
+  }
 }
 
 export type EvaluationSummary = {
@@ -103,6 +120,26 @@ export type EvaluationRun = EvaluationSummary & {
     citationIdValidationCorrect: boolean
     evidenceGateCorrect: boolean
     gateReason: string
+    expectedEvidenceGate: boolean
+    gateDiagnostics: {
+      candidateCount: number
+      bestVectorSimilarity: number
+      bestKeywordScore: number
+      bestExpectedVectorSimilarity: number
+      bestExpectedKeywordScore: number
+      expectedExactMatch: boolean
+      vectorPassingCandidateCount: number
+      keywordPassingCandidateCount: number
+      jointPassingCandidateCount: number
+      ablationDecisions: Record<string, boolean>
+      prefixShadow: {
+        retrievedDocumentIds: string[]
+        recallAt5: number
+        reciprocalRank: number
+        vectorGatePassed: boolean
+        bestExpectedCosine: number
+      }
+    }
     passed: boolean
   }>
 }

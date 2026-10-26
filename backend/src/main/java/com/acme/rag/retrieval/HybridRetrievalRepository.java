@@ -66,6 +66,18 @@ public class HybridRetrievalRepository {
                 .list();
     }
 
+    public List<RetrievalCandidate> authorizedChunks(Set<String> roles) {
+        return jdbc.sql("""
+                SELECT c.id, v.id AS version_id, d.id AS document_id, d.title, v.version_number,
+                       c.heading_path, c.chunk_text
+                """ + AUTHORIZED_FROM + " ORDER BY d.id, c.chunk_index, c.id")
+                .param("roles", roles)
+                .query((rs, row) -> candidate(rs.getString("id"), rs.getObject("version_id", UUID.class),
+                        rs.getString("document_id"), rs.getString("title"), rs.getInt("version_number"),
+                        rs.getString("heading_path"), rs.getString("chunk_text"), 0.0, false, false, false))
+                .list();
+    }
+
     private static RetrievalCandidate candidate(String chunkId, UUID versionId, String documentId, String title,
                                                 int version, String section, String text, double score,
                                                 boolean vectorMatch, boolean keywordMatch, boolean exactMatch) {

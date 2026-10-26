@@ -32,7 +32,7 @@ class ReciprocalRankFusionTest {
         var decision = gate.evaluate("What is our acquisition price?", List.of(weak));
 
         assertThat(decision.sufficient()).isFalse();
-        assertThat(decision.reason()).isEqualTo("NO_STRONG_EVIDENCE");
+        assertThat(decision.reason()).isEqualTo("NO_KEYWORD_MATCH");
         assertThat(decision.chunks()).isEmpty();
     }
 
@@ -46,7 +46,7 @@ class ReciprocalRankFusionTest {
         var decision = gate.evaluate("What exact production credential was exposed during IR-204?", List.of(report));
 
         assertThat(decision.sufficient()).isFalse();
-        assertThat(decision.reason()).isEqualTo("NO_STRONG_EVIDENCE");
+        assertThat(decision.reason()).isEqualTo("NO_KEYWORD_MATCH");
     }
 
     @Test
@@ -71,7 +71,7 @@ class ReciprocalRankFusionTest {
         var decision = gate.evaluate("What exact production credential was exposed during IR-204?", List.of(report));
 
         assertThat(decision.sufficient()).isFalse();
-        assertThat(decision.reason()).isEqualTo("NO_STRONG_EVIDENCE");
+        assertThat(decision.reason()).isEqualTo("NO_KEYWORD_MATCH");
         assertThat(decision.chunks()).isEmpty();
     }
 
@@ -84,7 +84,7 @@ class ReciprocalRankFusionTest {
         var decision = gate.evaluate("Compare GW-204 with API-429 behavior", List.of(exact));
 
         assertThat(decision.sufficient()).isFalse();
-        assertThat(decision.reason()).isEqualTo("NO_STRONG_EVIDENCE");
+        assertThat(decision.reason()).isEqualTo("NO_KEYWORD_MATCH");
     }
 
     private static RetrievalCandidate candidate(String id, boolean vector, boolean keyword) {

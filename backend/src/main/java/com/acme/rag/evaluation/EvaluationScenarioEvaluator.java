@@ -28,7 +28,14 @@ public final class EvaluationScenarioEvaluator {
     }
 
     public EvaluationScenarioResult evaluate(EvaluationScenario scenario) {
-        RetrievalResult retrieved = retrieval.retrieveForEvaluation(scenario.query(), roles.rolesFor(scenario.user()));
+        return evaluate(scenario, new PrefixShadowEvaluator.PrefixScenarioResult(List.of(), 0.0, 0.0,
+                false, false, 0.0));
+    }
+
+    public EvaluationScenarioResult evaluate(EvaluationScenario scenario,
+                                             PrefixShadowEvaluator.PrefixScenarioResult shadow) {
+        RetrievalResult retrieved = retrieval.retrieveForEvaluation(scenario.query(), roles.rolesFor(scenario.user()),
+                Set.copyOf(scenario.expectedDocumentIds()));
         List<String> documentIds = retrieved.retrievedCandidates().stream()
                 .map(chunk -> chunk.documentId()).distinct().toList();
         Set<String> retrievedSet = new HashSet<>(documentIds);
@@ -52,11 +59,22 @@ public final class EvaluationScenarioEvaluator {
         boolean citationIdsRejected = !sanitized.contains("S999");
         boolean citationCorrect = citationIdsRejected;
         boolean evidenceGateCorrect = retrieved.evidenceSufficient() == scenario.evidenceGateExpected();
+        var gateDiagnostic = retrieved.diagnostic();
+        var diagnostics = new EvaluationScenarioResult.GateDiagnostics(gateDiagnostic.candidateCount(),
+                gateDiagnostic.bestVectorSimilarity(), gateDiagnostic.bestKeywordScore(),
+                gateDiagnostic.bestExpectedVectorSimilarity(), gateDiagnostic.bestExpectedKeywordScore(),
+                gateDiagnostic.expectedExactMatch(), gateDiagnostic.vectorPassingCandidateCount(),
+                gateDiagnostic.keywordPassingCandidateCount(), gateDiagnostic.jointPassingCandidateCount(),
+                gateDiagnostic.ablationDecisions(),
+                new EvaluationScenarioResult.GateDiagnostics.PrefixShadowDiagnostics(shadow.retrievedDocumentIds(),
+                        shadow.recallAt5(), shadow.reciprocalRank(), shadow.evidenceGatePassed(),
+                        shadow.bestExpectedCosine()));
         boolean leakage = !forbidden.isEmpty();
         boolean passed = !leakage && freshnessCorrect && citationCorrect && evidenceGateCorrect;
         return new EvaluationScenarioResult(scenario.id(), scenario.category(), scenario.expectedDocumentIds(),
                 documentIds, missing, forbidden, scenario.expectedVersion(), versions, reciprocalRank, recall,
-                leakage, freshnessCorrect, citationCorrect, evidenceGateCorrect, retrieved.gateReason(), passed);
+                scenario.evidenceGateExpected(), leakage, freshnessCorrect, citationCorrect, evidenceGateCorrect,
+                retrieved.gateReason(), diagnostics, passed);
     }
 
     private static boolean hasFreshnessExpectation(EvaluationScenario scenario) {

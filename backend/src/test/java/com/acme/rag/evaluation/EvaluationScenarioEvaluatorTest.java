@@ -9,6 +9,7 @@ import com.acme.rag.citation.CitationResponseBuilder;
 import com.acme.rag.retrieval.HybridRetrievalService;
 import com.acme.rag.retrieval.RankedChunk;
 import com.acme.rag.retrieval.RetrievalResult;
+import com.acme.rag.evaluation.PrefixShadowEvaluator;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -20,7 +21,7 @@ class EvaluationScenarioEvaluatorTest {
         HybridRetrievalService retrieval = mock(HybridRetrievalService.class);
         RankedChunk exactChunk = new RankedChunk("error", UUID.randomUUID(), "doc-errors", "Errors", 2,
                 "GW-204", "GW-204 means an upstream connection failure", 0.01, 0.4, 0.0, true);
-        when(retrieval.retrieveForEvaluation("exact error GW-204", Set.of("ENGINEERING", "PUBLIC")))
+        when(retrieval.retrieveForEvaluation("exact error GW-204", Set.of("ENGINEERING", "PUBLIC"), Set.of("doc-errors")))
                 .thenReturn(result(List.of(exactChunk), true, "EXACT_IDENTIFIER_MATCH"));
         DemoRoleResolver roleResolver = mock(DemoRoleResolver.class);
         when(roleResolver.rolesFor("alice")).thenReturn(Set.of("ENGINEERING", "PUBLIC"));
@@ -42,7 +43,7 @@ class EvaluationScenarioEvaluatorTest {
     @Test
     void recordsForbiddenCandidateAsAclLeakageFailure() {
         HybridRetrievalService retrieval = mock(HybridRetrievalService.class);
-        when(retrieval.retrieveForEvaluation("leave policy", Set.of("ENGINEERING")))
+        when(retrieval.retrieveForEvaluation("leave policy", Set.of("ENGINEERING"), Set.of()))
                 .thenReturn(result(List.of(chunk("doc-hr", 1)), false, "NO_STRONG_EVIDENCE"));
         DemoRoleResolver roleResolver = mock(DemoRoleResolver.class);
         when(roleResolver.rolesFor("alice")).thenReturn(Set.of("ENGINEERING"));
@@ -60,7 +61,7 @@ class EvaluationScenarioEvaluatorTest {
     @Test
     void skipsFreshnessCheckWhenScenarioDoesNotSpecifyExpectedVersion() {
         HybridRetrievalService retrieval = mock(HybridRetrievalService.class);
-        when(retrieval.retrieveForEvaluation("known policy", Set.of("ENGINEERING")))
+        when(retrieval.retrieveForEvaluation("known policy", Set.of("ENGINEERING"), Set.of("doc-policy")))
                 .thenReturn(result(List.of(chunk("doc-policy", 4)), true, "LEXICAL_AND_RELEVANCE_MATCH"));
         DemoRoleResolver roleResolver = mock(DemoRoleResolver.class);
         when(roleResolver.rolesFor("alice")).thenReturn(Set.of("ENGINEERING"));
@@ -77,7 +78,7 @@ class EvaluationScenarioEvaluatorTest {
     @Test
     void comparesFreshnessOnlyForScenarioWithExpectedActiveVersion() {
         HybridRetrievalService retrieval = mock(HybridRetrievalService.class);
-        when(retrieval.retrieveForEvaluation("current policy", Set.of("ENGINEERING")))
+        when(retrieval.retrieveForEvaluation("current policy", Set.of("ENGINEERING"), Set.of("doc-policy")))
                 .thenReturn(result(List.of(chunk("doc-policy", 4)), true, "LEXICAL_AND_RELEVANCE_MATCH"));
         DemoRoleResolver roleResolver = mock(DemoRoleResolver.class);
         when(roleResolver.rolesFor("alice")).thenReturn(Set.of("ENGINEERING"));
@@ -96,7 +97,7 @@ class EvaluationScenarioEvaluatorTest {
         HybridRetrievalService retrieval = mock(HybridRetrievalService.class);
         RankedChunk weakChunk = new RankedChunk("public-chunk", UUID.randomUUID(), "doc-public", "Public FAQ",
                 1, "FAQ", "The product has a standard support portal and onboarding information.", 0.012, 0.61, 0.0, false);
-        when(retrieval.retrieveForEvaluation("What confidential acquisition price did Acme agree to?", Set.of("ENGINEERING", "PUBLIC")))
+        when(retrieval.retrieveForEvaluation("What confidential acquisition price did Acme agree to?", Set.of("ENGINEERING", "PUBLIC"), Set.of()))
                 .thenReturn(new RetrievalResult(List.of(), 1, 0, 0, false, "NO_STRONG_EVIDENCE", 1,
                         List.of(weakChunk)));
         DemoRoleResolver roleResolver = mock(DemoRoleResolver.class);
@@ -116,7 +117,7 @@ class EvaluationScenarioEvaluatorTest {
     @Test
     void hardNegativeEvaluatorDoesNotInferGateSuccessFromFixtureExpectation() {
         HybridRetrievalService retrieval = mock(HybridRetrievalService.class);
-        when(retrieval.retrieveForEvaluation("unknown price", Set.of("ENGINEERING")))
+        when(retrieval.retrieveForEvaluation("unknown price", Set.of("ENGINEERING"), Set.of()))
                 .thenReturn(result(List.of(chunk("doc-public", 1)), true, "LEXICAL_AND_RELEVANCE_MATCH"));
         DemoRoleResolver roleResolver = mock(DemoRoleResolver.class);
         when(roleResolver.rolesFor("alice")).thenReturn(Set.of("ENGINEERING"));
@@ -136,7 +137,7 @@ class EvaluationScenarioEvaluatorTest {
         HybridRetrievalService retrieval = mock(HybridRetrievalService.class);
         RankedChunk weakChunk = new RankedChunk("public-chunk", UUID.randomUUID(), "doc-public", "Public FAQ",
                 1, "FAQ", "general help information", 0.01, 0.60, 0.0, false);
-        when(retrieval.retrieveForEvaluation("leave allowance", Set.of("ENGINEERING", "PUBLIC")))
+        when(retrieval.retrieveForEvaluation("leave allowance", Set.of("ENGINEERING", "PUBLIC"), Set.of()))
                 .thenReturn(new RetrievalResult(List.of(), 1, 0, 0, false, "NO_STRONG_EVIDENCE", 1,
                         List.of(weakChunk)));
         DemoRoleResolver roleResolver = mock(DemoRoleResolver.class);
@@ -155,7 +156,7 @@ class EvaluationScenarioEvaluatorTest {
     @Test
     void unanswerableScenarioFailsIfProductionGateReturnsWeakCandidatesAsSufficient() {
         HybridRetrievalService retrieval = mock(HybridRetrievalService.class);
-        when(retrieval.retrieveForEvaluation("unknown price", Set.of("ENGINEERING")))
+        when(retrieval.retrieveForEvaluation("unknown price", Set.of("ENGINEERING"), Set.of()))
                 .thenReturn(result(List.of(chunk("doc-public", 1)), true, "LEXICAL_AND_RELEVANCE_MATCH"));
         DemoRoleResolver roleResolver = mock(DemoRoleResolver.class);
         when(roleResolver.rolesFor("alice")).thenReturn(Set.of("ENGINEERING"));
@@ -173,9 +174,13 @@ class EvaluationScenarioEvaluatorTest {
     void falseAbstentionFailsGateMetricAndKeepsRetrievalRecallSeparate() {
         HybridRetrievalService retrieval = mock(HybridRetrievalService.class);
         RankedChunk candidate = chunk("doc-policy", 1);
-        when(retrieval.retrieveForEvaluation("known policy", Set.of("ENGINEERING")))
+        when(retrieval.retrieveForEvaluation("known policy", Set.of("ENGINEERING"), Set.of("doc-policy")))
                 .thenReturn(new RetrievalResult(List.of(), 1, 0, 0, false, "NO_STRONG_EVIDENCE", 1,
-                        List.of(candidate)));
+                        List.of(candidate), new com.acme.rag.retrieval.EvidenceSufficiencyGate.Diagnostic(
+                        1, candidate.vectorSimilarity(), candidate.keywordScore(), candidate.vectorSimilarity(),
+                        candidate.keywordScore(), false, 1, 0, 0,
+                        java.util.Map.of("CURRENT_AND", false, "VECTOR_ONLY", true,
+                                "KEYWORD_ONLY", false, "RELAXED_AND", false))));
         DemoRoleResolver roleResolver = mock(DemoRoleResolver.class);
         when(roleResolver.rolesFor("alice")).thenReturn(Set.of("ENGINEERING"));
         EvaluationScenario scenario = new EvaluationScenario("false-abstention", EvaluationCategory.FACT_LOOKUP,
@@ -188,6 +193,7 @@ class EvaluationScenarioEvaluatorTest {
         assertThat(result.missingDocumentIds()).isEmpty();
         assertThat(result.evidenceGateCorrect()).isFalse();
         assertThat(result.passed()).isFalse();
+        assertThat(result.gateDiagnostics().bestExpectedVectorSimilarity()).isEqualTo(candidate.vectorSimilarity());
     }
 
     private static RankedChunk chunk(String documentId, int version) {
@@ -196,6 +202,8 @@ class EvaluationScenarioEvaluatorTest {
     }
 
     private static RetrievalResult result(List<RankedChunk> chunks, boolean sufficient, String reason) {
-        return new RetrievalResult(chunks, 1, 1, 0, sufficient, reason, chunks.size(), chunks);
+        return new RetrievalResult(chunks, 1, 1, 0, sufficient, reason, chunks.size(), chunks,
+                new com.acme.rag.retrieval.EvidenceSufficiencyGate.Diagnostic(chunks.size(), 0.9, 0.5,
+                        0.9, 0.5, false, 1, 1, 1, java.util.Map.of("CURRENT_AND", sufficient)));
     }
 }

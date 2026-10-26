@@ -92,14 +92,24 @@ class EvaluationTracePersistenceIT {
         Instant now = Instant.now();
         EvaluationScenarioResult scenario = new EvaluationScenarioResult("rag-001", EvaluationCategory.FACT_LOOKUP,
                 List.of("doc-policy"), List.of("doc-policy"), List.of(), List.of(), 2, Map.of("doc-policy", 2),
-                1.0, 1.0, false, true, true, true, "EXACT_IDENTIFIER_MATCH", true);
+                1.0, 1.0, true, false, true, true, true, "EXACT_IDENTIFIER_MATCH",
+                new EvaluationScenarioResult.GateDiagnostics(1, 0.8, 0.02, 0.8, 0.02, true,
+                        1, 1, 1, Map.of("CURRENT_AND", true),
+                        new EvaluationScenarioResult.GateDiagnostics.PrefixShadowDiagnostics(
+                                List.of("doc-policy"), 1.0, 1.0, true, 0.8)), true);
         EvaluationRunResult run = new EvaluationRunResult(UUID.randomUUID(), "dataset-v1", "OFFLINE_RETRIEVAL",
-                "test-embedding", Map.of("candidateDepth", 10), 1, new EvaluationMetrics(1.0, 1.0, 0, 1.0, 1.0, 1.0),
+                "test-embedding", Map.of("candidateDepth", 10), 1,
+                new EvaluationMetrics(1.0, 1.0, 0, 1.0, 1.0, 1.0,
+                        Map.of("CURRENT_AND", new EvaluationMetrics.GateAblationMetrics(1, 0, 0, 0, 1.0, 0.0, 0.0)),
+                        new EvaluationMetrics.PrefixShadowMetrics(true, 1.0, 1.0, 1.0, 0, 0)),
                 "SUCCEEDED", now, now, List.of(scenario));
 
         runs.save(run, "carol", Map.of("candidateDepth", 10, "fusedDepth", 8, "rrfConstant", 60));
 
         assertThat(runs.find(run.runId(), "carol").scenarios()).containsExactly(scenario);
+        assertThat(runs.find(run.runId(), "carol").metrics().gateAblationMetrics())
+                .containsEntry("CURRENT_AND", new EvaluationMetrics.GateAblationMetrics(1, 0, 0, 0, 1.0, 0.0, 0.0));
+        assertThat(runs.find(run.runId(), "carol").metrics().prefixShadowMetrics().available()).isTrue();
         assertThat(runs.recent(10)).extracting(summary -> summary.requestedBy()).contains("carol");
     }
 

@@ -7,12 +7,14 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import com.acme.rag.observability.RagMetrics;
+import com.acme.rag.retrieval.EvidenceSufficiencyGate;
 import org.springframework.stereotype.Service;
 
 @Service
 public class EvaluationService {
     private final EvaluationDatasetLoader datasetLoader;
     private final EvaluationScenarioEvaluator evaluator;
+    private final PrefixShadowEvaluator prefixShadowEvaluator;
     private final EvaluationMetricsCalculator metricsCalculator;
     private final EvaluationRunRepository runs;
     private final RagMetrics metrics;
@@ -26,6 +28,7 @@ public class EvaluationService {
     public EvaluationService(
             EvaluationDatasetLoader datasetLoader,
             EvaluationScenarioEvaluator evaluator,
+            PrefixShadowEvaluator prefixShadowEvaluator,
             EvaluationMetricsCalculator metricsCalculator,
             EvaluationRunRepository runs,
             RagMetrics metrics,
@@ -37,6 +40,7 @@ public class EvaluationService {
             @Value("${app.ingestion.embedding-model-id:nomic-embed-text}") String embeddingModelId) {
         this.datasetLoader = datasetLoader;
         this.evaluator = evaluator;
+        this.prefixShadowEvaluator = prefixShadowEvaluator;
         this.metricsCalculator = metricsCalculator;
         this.runs = runs;
         this.metrics = metrics;
@@ -51,13 +55,20 @@ public class EvaluationService {
     public EvaluationRunResult run(String requestedBy) {
         Instant started = Instant.now();
         EvaluationDataset dataset = datasetLoader.load();
+        PrefixShadowEvaluator.PrefixShadowResult shadow = prefixShadowEvaluator.evaluate(dataset.scenarios());
         java.util.ArrayList<EvaluationScenarioResult> evaluated = new java.util.ArrayList<>();
         for (EvaluationScenario scenario : dataset.scenarios()) {
-            evaluated.add(evaluator.evaluate(scenario));
+            evaluated.add(evaluator.evaluate(scenario, shadow.scenarios().get(scenario.id())));
         }
         List<EvaluationScenarioResult> results = List.copyOf(evaluated);
         Instant completed = Instant.now();
-        EvaluationMetrics calculatedMetrics = metricsCalculator.calculate(results);
+        EvaluationMetrics baseMetrics = metricsCalculator.calculate(results);
+        EvaluationMetrics calculatedMetrics = new EvaluationMetrics(baseMetrics.recallAt5(),
+                baseMetrics.meanReciprocalRank(), baseMetrics.aclLeakageCount(), baseMetrics.freshnessAccuracy(),
+                baseMetrics.citationIdValidationAccuracy(), baseMetrics.evidenceGateAccuracy(),
+                baseMetrics.gateAblationMetrics(), new EvaluationMetrics.PrefixShadowMetrics(true, shadow.recallAt5(),
+                shadow.meanReciprocalRank(), shadow.evidenceGateAccuracy(), shadow.falseAbstentionCount(),
+                shadow.falseAdmissionCount()));
         Map<String, Object> config = retrievalConfiguration();
         EvaluationRunResult result = new EvaluationRunResult(UUID.randomUUID(), dataset.version(), "OFFLINE_RETRIEVAL",
                 embeddingModelId, config, results.size(), calculatedMetrics, "SUCCEEDED", started, completed, results);
@@ -81,6 +92,12 @@ public class EvaluationService {
         configuration.put("rrfConstant", rrfConstant);
         configuration.put("minimumVectorSimilarity", minimumVectorSimilarity);
         configuration.put("minimumKeywordScore", minimumKeywordScore);
+        configuration.put("diagnosticRelaxedVectorSimilarity", EvidenceSufficiencyGate.RELAXED_VECTOR_SIMILARITY);
+        configuration.put("diagnosticRelaxedKeywordScore", EvidenceSufficiencyGate.RELAXED_KEYWORD_SCORE);
+        configuration.put("prefixShadow", "Nomic search_query/search_document over authorized in-memory chunks");
+        configuration.put("prefixShadowDocumentPrefix", "search_document: ");
+        configuration.put("prefixShadowQueryPrefix", "search_query: ");
+        configuration.put("prefixShadowDenseDepth", 10);
         return Map.copyOf(configuration);
     }
 }

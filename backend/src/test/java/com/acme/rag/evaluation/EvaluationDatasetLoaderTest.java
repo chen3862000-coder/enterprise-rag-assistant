@@ -10,7 +10,7 @@ class EvaluationDatasetLoaderTest {
     void loadsVersionedFiftySixScenarioMixAndUniqueIds() {
         EvaluationDataset dataset = new EvaluationDatasetLoader(new ObjectMapper()).load();
 
-        assertThat(dataset.version()).isEqualTo("2026-10-p1-v3");
+        assertThat(dataset.version()).isEqualTo("2026-10-p1-v4");
         assertThat(dataset.scenarios()).hasSize(56).extracting(EvaluationScenario::id).doesNotHaveDuplicates();
         assertThat(dataset.scenarios()).filteredOn(scenario -> scenario.category() == EvaluationCategory.FACT_LOOKUP).hasSize(12);
         assertThat(dataset.scenarios()).filteredOn(scenario -> scenario.category() == EvaluationCategory.MULTI_DOCUMENT_QA).hasSize(8);
@@ -22,8 +22,13 @@ class EvaluationDatasetLoaderTest {
         assertThat(dataset.scenarios()).filteredOn(scenario -> scenario.category() == EvaluationCategory.PERMISSION_ISOLATION
                         && scenario.expectedDocumentIds().isEmpty())
                 .allSatisfy(scenario -> assertThat(scenario.evidenceGateExpected()).isFalse());
+        assertThat(dataset.scenarios()).filteredOn(EvaluationScenario::evidenceGateExpected)
+                .extracting(EvaluationScenario::id)
+                .contains("rag-004", "rag-005", "rag-007", "rag-008", "rag-023", "rag-028");
         assertThat(dataset.scenarios()).filteredOn(EvaluationScenario::abstentionExpected).hasSize(21);
         assertThat(dataset.scenarios()).extracting(EvaluationScenario::id)
                 .contains("rag-053", "rag-054", "rag-055", "rag-056");
+        assertThat(dataset.scenarios()).allSatisfy(scenario ->
+                assertThat(scenario.shouldPassEvidenceGate()).isNotNull());
     }
 }

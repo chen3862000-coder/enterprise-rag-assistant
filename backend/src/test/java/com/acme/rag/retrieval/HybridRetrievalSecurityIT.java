@@ -6,6 +6,7 @@ import com.acme.rag.M2TestConfiguration;
 import com.acme.rag.evaluation.DemoRoleResolver;
 import com.acme.rag.evaluation.EvaluationDatasetLoader;
 import com.acme.rag.evaluation.EvaluationScenarioEvaluator;
+import com.acme.rag.evaluation.PrefixShadowEvaluator;
 import com.acme.rag.evaluation.EvaluationScenarioResult;
 import com.acme.rag.evaluation.EvaluationCategory;
 import com.acme.rag.evaluation.EvaluationDataset;
@@ -58,6 +59,7 @@ class HybridRetrievalSecurityIT {
     @Autowired SourceRepository sources;
     @Autowired EvaluationDatasetLoader datasetLoader;
     @Autowired EvaluationScenarioEvaluator scenarioEvaluator;
+    @Autowired PrefixShadowEvaluator prefixShadow;
     @Autowired JdbcTemplate jdbc;
     @Autowired com.acme.rag.document.ingestion.DocumentIngestionService ingestion;
 
@@ -137,6 +139,18 @@ class HybridRetrievalSecurityIT {
 
         assertThat(retrieval.keyword("GW-204", Set.of("ENGINEERING"), 20)).isEmpty();
         assertThat(sources.findAuthorized("doc-engineering-v1-c0", Set.of("ENGINEERING"))).isEmpty();
+    }
+
+    @Test
+    void prefixShadowEmbedsAndRetrievesOnlySqlAuthorizedChunks() {
+        EvaluationScenario scenario = new EvaluationScenario("prefix-acl", EvaluationCategory.PERMISSION_ISOLATION,
+                "alice", "What is the confidential leave policy?", List.of("doc-hr"), List.of("doc-hr"),
+                null, false, true, null);
+
+        PrefixShadowEvaluator.PrefixShadowResult result = prefixShadow.evaluate(List.of(scenario));
+
+        assertThat(result.scenarios().get("prefix-acl").retrievedDocumentIds())
+                .doesNotContain("doc-hr").contains("doc-public", "doc-engineering");
     }
 
     @Test

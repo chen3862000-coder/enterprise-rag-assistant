@@ -19,7 +19,7 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 @Component
 public final class EvaluationDatasetLoader {
-    public static final String DATASET_VERSION = "2026-10-p1-v3";
+    public static final String DATASET_VERSION = "2026-10-p1-v4";
     private final ObjectMapper mapper;
 
     @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "ObjectMapper is a shared Spring service dependency; this loader exposes no mapper reference")
@@ -69,7 +69,9 @@ public final class EvaluationDatasetLoader {
 
     private static void validateScenario(EvaluationScenario scenario, Set<String> ids) {
         if (scenario.id() == null || !ids.add(scenario.id()) || scenario.query() == null
-                || scenario.query().isBlank() || scenario.user() == null) {
+                || scenario.query().isBlank() || scenario.user() == null
+                || scenario.shouldPassEvidenceGate() == null
+                || scenario.abstentionExpected() == scenario.evidenceGateExpected()) {
             throw new IllegalStateException("Evaluation dataset has missing or duplicate scenario fields");
         }
     }

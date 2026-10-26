@@ -14,11 +14,13 @@ public record EvaluationScenarioResult(
         Map<String, Integer> retrievedVersions,
         double reciprocalRank,
         double recallAt5,
+        boolean expectedEvidenceGate,
         boolean aclLeakage,
         boolean freshnessCorrect,
         boolean citationIdValidationCorrect,
         boolean evidenceGateCorrect,
         String gateReason,
+        GateDiagnostics gateDiagnostics,
         boolean passed) {
     public EvaluationScenarioResult {
         expectedDocumentIds = List.copyOf(expectedDocumentIds);
@@ -26,5 +28,31 @@ public record EvaluationScenarioResult(
         missingDocumentIds = List.copyOf(missingDocumentIds);
         forbiddenDocumentIds = List.copyOf(forbiddenDocumentIds);
         retrievedVersions = Map.copyOf(retrievedVersions);
+    }
+
+    public record GateDiagnostics(int candidateCount, double bestVectorSimilarity, double bestKeywordScore,
+                                  double bestExpectedVectorSimilarity, double bestExpectedKeywordScore,
+                                  boolean expectedExactMatch, long vectorPassingCandidateCount,
+                                  long keywordPassingCandidateCount, int jointPassingCandidateCount,
+                                  Map<String, Boolean> ablationDecisions,
+                                  PrefixShadowDiagnostics prefixShadow) {
+        public GateDiagnostics {
+            ablationDecisions = Map.copyOf(ablationDecisions);
+            if (prefixShadow == null) {
+                prefixShadow = PrefixShadowDiagnostics.empty();
+            }
+        }
+
+        public record PrefixShadowDiagnostics(List<String> retrievedDocumentIds, double recallAt5,
+                                              double reciprocalRank, boolean vectorGatePassed,
+                                              double bestExpectedCosine) {
+            public PrefixShadowDiagnostics {
+                retrievedDocumentIds = List.copyOf(retrievedDocumentIds);
+            }
+
+            public static PrefixShadowDiagnostics empty() {
+                return new PrefixShadowDiagnostics(List.of(), 0.0, 0.0, false, 0.0);
+            }
+        }
     }
 }

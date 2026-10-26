@@ -40,13 +40,21 @@ public class HybridRetrievalService {
     }
 
     public RetrievalResult retrieveForEvaluation(String message, Set<String> roles) {
+        return retrieveForEvaluation(message, roles, Set.of());
+    }
+
+    public RetrievalResult retrieveForEvaluation(String message, Set<String> roles, Set<String> expectedDocumentIds) {
         if (roles == null || roles.isEmpty()) {
             throw new IllegalArgumentException("Evaluation identity has no retrieval scope");
         }
-        return retrieve(message, Set.copyOf(roles));
+        return retrieve(message, Set.copyOf(roles), Set.copyOf(expectedDocumentIds));
     }
 
     private RetrievalResult retrieve(String message, Set<String> roles) {
+        return retrieve(message, roles, Set.of());
+    }
+
+    private RetrievalResult retrieve(String message, Set<String> roles, Set<String> expectedDocumentIds) {
         String query = normalize(message);
         float[] vector = embeddings.embed(query);
         List<RetrievalCandidate> vectorCandidates = repository.vector(vector, roles, candidateDepth);
@@ -56,9 +64,10 @@ public class HybridRetrievalService {
             exactCandidates.addAll(repository.exact(identifier, roles, candidateDepth));
         }
         List<RankedChunk> fused = fusion.fuse(List.of(vectorCandidates, keywordCandidates, exactCandidates));
-        EvidenceSufficiencyGate.Decision decision = sufficiencyGate.evaluate(query, fused);
+        EvidenceSufficiencyGate.Decision decision = sufficiencyGate.evaluate(query, fused, expectedDocumentIds);
         return new RetrievalResult(decision.chunks(), vectorCandidates.size(), keywordCandidates.size(),
-                exactCandidates.size(), decision.sufficient(), decision.reason(), fused.size(), fused);
+                exactCandidates.size(), decision.sufficient(), decision.reason(), fused.size(), fused,
+                decision.diagnostic());
     }
 
     private static String normalize(String message) {

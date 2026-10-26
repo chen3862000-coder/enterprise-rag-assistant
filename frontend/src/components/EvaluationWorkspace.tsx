@@ -50,6 +50,15 @@ export function EvaluationWorkspace() {
       <Metric label="Citation ID validation" value={metrics ? percent(metrics.citationIdValidationAccuracy) : '—'} detail="Supplied reference IDs only; not entailment" icon={<CheckCircle2 size={16} />} />
       <Metric label="Evidence gate" value={metrics ? percent(metrics.evidenceGateAccuracy) : '—'} detail="Shared runtime gate matches fixture expectations" icon={<CircleAlert size={16} />} />
     </div>
+    {metrics && Object.keys(metrics.gateAblationMetrics ?? {}).length > 0 && <div className="evaluation-method-note">
+      <Activity size={16} /><span><strong>DIAGNOSTIC ABLATIONS</strong> Not applied to chat. {Object.entries(metrics.gateAblationMetrics).map(([policy, score]) => score.falseAbstention !== null && score.falseAdmission !== null
+        ? `${policy}: false abstention ${percent(score.falseAbstentionRate ?? 0)}, false admission ${percent(score.falseAdmissionRate ?? 0)} (${score.falseAbstention}/${(score.truePass ?? 0) + (score.falseAbstention ?? 0)}, ${score.falseAdmission}/${(score.falseAdmission ?? 0) + (score.trueAbstention ?? 0)})`
+        : `${policy}: accuracy ${percent(score.accuracy)} (historical run; error breakdown unavailable)`).join(' · ')}</span>
+    </div>}
+    {metrics?.prefixShadowMetrics?.available && <div className="evaluation-method-note">
+      <Activity size={16} /><span><strong>NOMIC PREFIX SHADOW</strong> Not used for chat. Paired `search_query:` / `search_document:` cosine retrieval: Recall@5 {percent(metrics.prefixShadowMetrics.recallAt5)}, MRR {metrics.prefixShadowMetrics.meanReciprocalRank.toFixed(3)}, vector-gate accuracy {percent(metrics.prefixShadowMetrics.vectorGateAccuracy)}, false abstentions {metrics.prefixShadowMetrics.falseAbstentionCount}, false admissions {metrics.prefixShadowMetrics.falseAdmissionCount}.</span>
+    </div>}
+    {selected && <p className="metric-footnote">The active gate must agree with `shouldPassEvidenceGate`. `shouldAbstain` is retained as the customer-facing contract expectation.</p>}
     {selected && <p className="metric-footnote">Gate/ACL/freshness contract checks are shown in scenario pass status. Recall and MRR remain separate retrieval measurements; a low retrieval score can fail retrieval without implying an ACL bypass.</p>}
     <div className="evaluation-columns">
       <section className="runs-card"><div className="section-card-heading"><div><h2>Evaluation runs</h2><p>Persisted measurements from the configured dataset</p></div><button className="icon-button" onClick={() => void refresh()} aria-label="Refresh runs"><RefreshCw size={16} /></button></div>
@@ -70,6 +79,8 @@ export function EvaluationWorkspace() {
               <div><span className="failure-id">{scenario.scenarioId}</span><span className="failure-category">{scenario.category}</span></div>
               <p>{scenario.aclLeakage ? `ACL leakage: ${scenario.forbiddenDocumentIds.join(', ')}`
                 : `${scenario.passed ? 'Retrieval relevance miss' : `Contract check failed: gate=${scenario.gateReason}`}; missing expected candidates=${scenario.missingDocumentIds.join(', ') || 'none'}`}</p>
+              <small>Expected chunk signals: cosine {scenario.gateDiagnostics.bestExpectedVectorSimilarity.toFixed(3)}, keyword {scenario.gateDiagnostics.bestExpectedKeywordScore.toFixed(5)}. Passing candidates: vector {scenario.gateDiagnostics.vectorPassingCandidateCount}, keyword {scenario.gateDiagnostics.keywordPassingCandidateCount}, both {scenario.gateDiagnostics.jointPassingCandidateCount}.</small>
+              <small>Prefix shadow: best cosine {scenario.gateDiagnostics.prefixShadow.bestExpectedCosine.toFixed(3)}, Recall@5 {percent(scenario.gateDiagnostics.prefixShadow.recallAt5)}, vector gate {scenario.gateDiagnostics.prefixShadow.vectorGatePassed ? 'pass' : 'abstain'}.</small>
             </div>)}
         </div> : <div className="metric-explainer">
           <div><b>01</b><span><strong>Retrieval relevance</strong><small>Recall@5 and MRR use expected document IDs for answerable scenarios.</small></span></div>

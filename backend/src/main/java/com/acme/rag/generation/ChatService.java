@@ -102,7 +102,8 @@ public class ChatService {
     private ChatResponse failedChat(String message, String traceId, String username, Instant createdAt,
                                     long startedNanos, RuntimeException exception) {
         var empty = new com.acme.rag.retrieval.RetrievalResult(java.util.List.of(), 0, 0, 0,
-                false, "REQUEST_FAILED", 0, java.util.List.of());
+                false, "REQUEST_FAILED", 0, java.util.List.of(),
+                com.acme.rag.retrieval.EvidenceSufficiencyGate.Diagnostic.empty(0));
         String grounding = "INSUFFICIENT_EVIDENCE";
         var response = new ChatResponse("The request could not be completed safely. Please retry.",
                 java.util.List.of(), traceId, grounding);

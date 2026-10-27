@@ -8,6 +8,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
+/** Resolves the authenticated principal to a server-defined demo identity and its capabilities. */
 @Component
 public class CurrentIdentity {
     private final DemoIdentityService identities;
@@ -18,6 +19,7 @@ public class CurrentIdentity {
         this.events = events;
     }
 
+    /** Returns the recognized authenticated identity, publishing a denial event on failure. */
     public DemoIdentity require() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()) {
@@ -30,10 +32,12 @@ public class CurrentIdentity {
         });
     }
 
+    /** Returns retrieval roles from the server-side identity; request-supplied roles are never consulted. */
     public Set<String> allowedRoles() {
         return require().roles();
     }
 
+    /** Requires the explicit document-management capability, independent of document-access roles. */
     public void requireDocumentAdmin() {
         if (!isDocumentAdmin()) {
             events.publishEvent(new AccessDeniedEvent());
@@ -41,10 +45,12 @@ public class CurrentIdentity {
         }
     }
 
+    /** Indicates whether the recognized identity has the explicit document-management capability. */
     public boolean isDocumentAdmin() {
         return require().documentAdmin();
     }
 
+    /** Returns the username of the recognized authenticated identity. */
     public String username() {
         return require().username();
     }

@@ -26,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
+/** Document listing and administration endpoints; mutations require explicit document-admin capability. */
 @RestController
 @RequestMapping("/api/documents")
 public class DocumentController {
@@ -40,6 +41,7 @@ public class DocumentController {
         this.identity = identity;
     }
 
+    /** Lists documents visible to the caller's roles, or all documents for a document administrator. */
     @GetMapping
     public List<DocumentSummary> list() {
         if (identity.isDocumentAdmin()) {
@@ -48,6 +50,11 @@ public class DocumentController {
         return documents.list(identity.allowedRoles());
     }
 
+    /**
+     * Uploads content as a new logical document or a new version when the ID already exists.
+     * Multipart fields are {@code file}, {@code documentId}, {@code title}, {@code department},
+     * {@code classification}, and comma-separated {@code allowedRoles}.
+     */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public IngestionResult upload(
             @RequestPart("file") MultipartFile file,
@@ -65,6 +72,10 @@ public class DocumentController {
         }
     }
 
+    /**
+     * Creates a new version for the specified logical document. Multipart fields are {@code file},
+     * {@code title}, {@code department}, {@code classification}, and comma-separated {@code allowedRoles}.
+     */
     @PostMapping(value = "/{documentId}/reindex", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public IngestionResult reindex(@PathVariable String documentId, @RequestPart("file") MultipartFile file,
                                    @RequestParam("title") String title, @RequestParam("department") String department,
@@ -79,6 +90,7 @@ public class DocumentController {
         }
     }
 
+    /** Lists version metadata only when the caller can access the document, unless they are an administrator. */
     @GetMapping("/{documentId}/versions")
     public List<DocumentVersionSummary> versions(@PathVariable String documentId) {
         if (identity.isDocumentAdmin()) {
@@ -87,6 +99,7 @@ public class DocumentController {
         return documents.versions(documentId, identity.allowedRoles());
     }
 
+    /** Disables retrieval for a document while retaining its record and version data. */
     @PostMapping("/{documentId}/disable")
     public ResponseEntity<Void> disable(@PathVariable String documentId) {
         identity.requireDocumentAdmin();
@@ -96,6 +109,7 @@ public class DocumentController {
         return ResponseEntity.noContent().build();
     }
 
+    /** Soft-deletes the document; retained chunks are excluded from retrieval rather than physically purged. */
     @DeleteMapping("/{documentId}")
     public ResponseEntity<Void> delete(@PathVariable String documentId) {
         identity.requireDocumentAdmin();
@@ -105,6 +119,7 @@ public class DocumentController {
         return ResponseEntity.noContent().build();
     }
 
+    /** Restores a disabled or soft-deleted logical document; this does not reprocess its content. */
     @PostMapping("/{documentId}/restore")
     public ResponseEntity<Void> restore(@PathVariable String documentId) {
         identity.requireDocumentAdmin();

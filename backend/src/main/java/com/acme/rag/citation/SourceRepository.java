@@ -5,6 +5,7 @@ import java.util.Set;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+/** Performs database-side source authorization against document status, active version, and caller roles. */
 @Repository
 public class SourceRepository {
     private final JdbcClient jdbc;
@@ -13,6 +14,7 @@ public class SourceRepository {
         this.jdbc = jdbc;
     }
 
+    /** Returns a preview only when its chunk belongs to a currently active document/version allowed for a role. */
     public Optional<SourcePreview> findAuthorized(String chunkId, Set<String> roles) {
         return jdbc.sql("""
                 SELECT c.id AS chunk_id, d.id AS document_id, d.title, v.version_number, c.heading_path, c.chunk_text
@@ -34,6 +36,7 @@ public class SourceRepository {
                         rs.getString("chunk_text"))).optional();
     }
 
+    /** Same authorization check as {@link #findAuthorized(String, Set)}, additionally binding the expected document ID. */
     public Optional<SourcePreview> findAuthorized(String chunkId, String documentId, Set<String> roles) {
         return jdbc.sql("""
                 SELECT c.id AS chunk_id, d.id AS document_id, d.title, v.version_number, c.heading_path, c.chunk_text

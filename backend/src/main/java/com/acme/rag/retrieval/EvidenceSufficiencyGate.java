@@ -6,6 +6,7 @@ import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+/** Deterministically admits only sufficiently supported candidates and fails closed on intent/scope rejection. */
 @Component
 public final class EvidenceSufficiencyGate {
     public static final double RELAXED_VECTOR_SIMILARITY = 0.25;
@@ -23,15 +24,21 @@ public final class EvidenceSufficiencyGate {
         this.minimumKeywordScore = minimumKeywordScore;
     }
 
+    /** Evaluates candidates using the default demo-role scope; runtime retrieval should pass caller roles explicitly. */
     public Decision evaluate(String query, List<RankedChunk> chunks) {
         return evaluate(query, chunks, Set.of(), Set.of("PUBLIC", "ENGINEERING", "HR", "SECURITY_ADMIN"));
     }
 
+    /** Evaluates candidates with expected-document diagnostics and the default demo-role scope. */
     public Decision evaluate(String query, List<RankedChunk> chunks, Set<String> expectedDocumentIds) {
         return evaluate(query, chunks, expectedDocumentIds,
                 Set.of("PUBLIC", "ENGINEERING", "HR", "SECURITY_ADMIN"));
     }
 
+    /**
+     * Admits exact authorized identifier matches or candidates meeting the configured vector, keyword,
+     * and adaptive lexical-coverage thresholds; expected IDs are diagnostic and do not grant access.
+     */
     public Decision evaluate(String query, List<RankedChunk> chunks, Set<String> expectedDocumentIds,
                              Set<String> authorizedRoles) {
         if (chunks.isEmpty()) {

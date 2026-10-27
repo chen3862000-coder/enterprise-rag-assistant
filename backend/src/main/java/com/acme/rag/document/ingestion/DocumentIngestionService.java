@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import com.acme.rag.observability.RagMetrics;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
+/** Validates, parses, chunks, embeds, and activates document versions while preserving the previous active version on failure. */
 @Service
 public class DocumentIngestionService {
     private static final java.util.Set<String> SAFE_PDF_FAILURES = java.util.Set.of(
@@ -38,6 +39,10 @@ public class DocumentIngestionService {
         this.metrics = metrics;
     }
 
+    /**
+     * Ingests content as a new version or returns the existing version for duplicate content.
+     * A version becomes active only after processing and persistence complete successfully.
+     */
     public IngestionResult ingest(IngestionRequest request) {
         ValidatedUpload upload = validate(request);
         VersionReservation reservation = reserve(upload);

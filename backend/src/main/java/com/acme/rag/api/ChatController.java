@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Session-authenticated chat transport; authorization scope comes from the server identity. */
 @RestController
 @RequestMapping("/api/chat")
 public class ChatController {
@@ -18,6 +19,10 @@ public class ChatController {
         this.chat = chat;
     }
 
+    /**
+     * Answers with currently authorized evidence, abstaining with no citations when the
+     * deterministic evidence gate rejects the retrieved material.
+     */
     @PostMapping
     public ChatResponse chat(@Valid @RequestBody ChatRequest request) {
         return chat.chat(request.message());

@@ -5,6 +5,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Persisted offline retrieval evaluation. Its metrics cover retrieval, ACL, freshness, citation-ID,
+ * and evidence-gate behavior; they do not measure generated-answer correctness or faithfulness.
+ */
 public record EvaluationRunResult(
         UUID runId,
         String datasetVersion,

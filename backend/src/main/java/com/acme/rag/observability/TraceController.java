@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
+/** Exposes bounded trace details only to the trace owner or a document administrator. */
 @RestController
 @RequestMapping("/api/traces")
 public class TraceController {
@@ -24,6 +25,7 @@ public class TraceController {
         this.identities = identities;
     }
 
+    /** Returns not found for traces outside the caller's owner/admin scope. */
     @GetMapping("/{traceId}")
     public ResponseEntity<RagTrace> get(@PathVariable UUID traceId) {
         String principal = identity.username();

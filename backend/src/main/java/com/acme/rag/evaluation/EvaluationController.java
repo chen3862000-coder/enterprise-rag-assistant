@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import com.acme.rag.observability.RagMetrics;
 
+/** Administrator-only endpoints for deterministic offline retrieval evaluation. */
 @RestController
 @RequestMapping("/api/evaluations")
 public class EvaluationController {
@@ -25,6 +26,7 @@ public class EvaluationController {
         this.metrics = metrics;
     }
 
+    /** Runs the versioned evaluation dataset without invoking the answer-generation model. */
     @PostMapping("/run")
     public EvaluationRunResult run() {
         identity.requireDocumentAdmin();
@@ -36,12 +38,14 @@ public class EvaluationController {
         }
     }
 
+    /** Lists recent summaries; {@code limit} must be between 1 and 100. */
     @GetMapping
     public List<EvaluationRunSummary> recent(@RequestParam(defaultValue = "10") int limit) {
         identity.requireDocumentAdmin();
         return evaluations.recent(limit);
     }
 
+    /** Returns a persisted evaluation run, including scenario diagnostics. */
     @GetMapping("/{runId}")
     public ResponseEntity<EvaluationRunResult> get(@PathVariable UUID runId) {
         identity.requireDocumentAdmin();

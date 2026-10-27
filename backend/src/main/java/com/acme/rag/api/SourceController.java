@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Resolves source previews under the current identity's role-based document permissions. */
 @RestController
 @RequestMapping("/api/sources")
 public class SourceController {
@@ -23,6 +24,7 @@ public class SourceController {
         this.metrics = metrics;
     }
 
+    /** Returns only an active-version chunk authorized for the caller; inaccessible IDs are reported as not found. */
     @GetMapping("/{chunkId}")
     public ResponseEntity<SourcePreview> source(@PathVariable String chunkId) {
         if (!chunkId.matches("[A-Za-z0-9_-]{1,160}")) {

@@ -8,6 +8,7 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/** Performs role-scoped vector, keyword, and exact-identifier retrieval before fusion and evidence gating. */
 @Service
 public class HybridRetrievalService {
     private final EmbeddingModel embeddings;
@@ -35,14 +36,20 @@ public class HybridRetrievalService {
         this.candidateDepth = candidateDepth;
     }
 
+    /** Retrieves using roles resolved from the authenticated server-side identity. */
     public RetrievalResult retrieve(String message) {
         return retrieve(message, identity.allowedRoles());
     }
 
+    /**
+     * Retrieves for an offline evaluation identity. Expected document IDs affect gate diagnostics/policy only;
+     * database ACL predicates still constrain every candidate before fusion.
+     */
     public RetrievalResult retrieveForEvaluation(String message, Set<String> roles) {
         return retrieveForEvaluation(message, roles, Set.of());
     }
 
+    /** Evaluation variant that records expected-document diagnostics without bypassing role filtering. */
     public RetrievalResult retrieveForEvaluation(String message, Set<String> roles, Set<String> expectedDocumentIds) {
         if (roles == null || roles.isEmpty()) {
             throw new IllegalArgumentException("Evaluation identity has no retrieval scope");

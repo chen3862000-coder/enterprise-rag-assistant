@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
+/** Coordinates authorized retrieval, evidence gating, optional generation, citations, and trace recording. */
 @Service
 public class ChatService {
     private final HybridRetrievalService retrieval;
@@ -46,6 +47,10 @@ public class ChatService {
         this.identity = identity;
     }
 
+    /**
+     * Processes a chat request for the authenticated server-side identity. Trace persistence is
+     * best-effort; operational failures are mapped to safe {@link ChatServiceException} values.
+     */
     @SuppressWarnings("PMD.AvoidCatchingGenericException")
     public ChatResponse chat(String message) {
         long startedNanos = System.nanoTime();

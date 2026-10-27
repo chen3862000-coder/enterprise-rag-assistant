@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Demo-session authentication endpoints; accepted identities and roles are controlled by the server. */
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
@@ -25,6 +26,7 @@ public class AuthController {
         this.identities = identities;
     }
 
+    /** Starts a session for a configured demo identity; unknown identities receive an unauthorized response. */
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         try {
@@ -35,6 +37,7 @@ public class AuthController {
         }
     }
 
+    /** Returns the server-resolved session identity, or unauthorized when no recognized session exists. */
     @org.springframework.web.bind.annotation.GetMapping("/me")
     public ResponseEntity<LoginResponse> currentUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -48,6 +51,7 @@ public class AuthController {
         return ResponseEntity.ok(new LoginResponse(identity.username(), identity.roles(), identity.documentAdmin()));
     }
 
+    /** Invalidates the current session. Browser clients must include the CSRF token. */
     @org.springframework.web.bind.annotation.PostMapping("/logout")
     public ResponseEntity<Void> logout() {
         authentication.logout();

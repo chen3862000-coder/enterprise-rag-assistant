@@ -10,6 +10,7 @@ import com.acme.rag.observability.RagMetrics;
 import com.acme.rag.retrieval.EvidenceSufficiencyGate;
 import org.springframework.stereotype.Service;
 
+/** Runs and persists deterministic offline retrieval/gate evaluations and their run-specific configuration. */
 @Service
 public class EvaluationService {
     private final EvaluationDatasetLoader datasetLoader;
@@ -52,6 +53,7 @@ public class EvaluationService {
         this.embeddingModelId = embeddingModelId;
     }
 
+    /** Evaluates the checked-in dataset without calling the answer-generation model and persists the measured run. */
     public EvaluationRunResult run(String requestedBy) {
         Instant started = Instant.now();
         EvaluationDataset dataset = datasetLoader.load();
@@ -79,10 +81,12 @@ public class EvaluationService {
         return result;
     }
 
+    /** Loads a persisted run in the scope enforced by the evaluation repository. */
     public EvaluationRunResult get(UUID runId, String requestedBy) {
         return runs.find(runId, requestedBy);
     }
 
+    /** Returns recent persisted run summaries, subject to repository-enforced limit bounds. */
     public List<EvaluationRunSummary> recent(int limit) {
         return runs.recent(limit);
     }

@@ -23,6 +23,14 @@ Before declaring a coding task complete:
 - Evidence sufficiency and abstention behavior must be deterministic, shared between runtime chat and offline evaluation, and tested with weak-evidence hard negatives.
 - Do not add or claim functionality, metrics, security guarantees, or test results that have not been implemented and verified.
 
+## Code Documentation
+
+- Add concise class-level and method-level Javadocs to public API endpoints and key service/domain classes when their purpose or contract is not obvious from their names and signatures.
+- Document behavior callers need to rely on: authorization scope, input constraints, meaningful return/status and error behavior, side effects, and lifecycle/failure semantics. For records and DTOs, explain fields whose meaning or nullability is not self-evident.
+- Make important architecture invariants explicit where they are enforced, such as server-controlled identity, SQL ACL filtering before fusion/model context, citation/source reauthorization, atomic version activation, and deterministic offline evaluation/abstention.
+- Keep comments accurate to the implementation and approved architecture; update or remove them when behavior changes. Do not promise guarantees that code and tests do not establish.
+- Avoid boilerplate that repeats a method name, annotations, or obvious statements. Prefer documenting why a contract matters and any non-obvious constraints; do not comment every getter, private helper, or straightforward line of code.
+
 ## Completion Review
 
 In the final response, summarize the changes, list verification commands and outcomes, state any remaining gaps/limitations, and confirm whether the architecture review found any deviations from the approved plan.

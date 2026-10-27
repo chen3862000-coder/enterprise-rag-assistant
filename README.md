@@ -41,7 +41,7 @@ flowchart LR
   GEN --> DEEPSEEK[DeepSeek ChatModel]
 ```
 
-More detail is in [`docs/architecture.md`](docs/architecture.md), [`docs/security-design.md`](docs/security-design.md), [`docs/retrieval-design.md`](docs/retrieval-design.md), and [`docs/evaluation-design.md`](docs/evaluation-design.md).
+More detail is in [`docs/architecture.md`](docs/architecture.md), the [DDD system design](docs/ddd-system-design.md), [`docs/security-design.md`](docs/security-design.md), [`docs/retrieval-design.md`](docs/retrieval-design.md), and [`docs/evaluation-design.md`](docs/evaluation-design.md).
 
 ## Quick Start
 

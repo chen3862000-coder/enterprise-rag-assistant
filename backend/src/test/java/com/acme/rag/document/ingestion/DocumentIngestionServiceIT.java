@@ -231,6 +231,59 @@ class DocumentIngestionServiceIT {
     }
 
     @Test
+    void scannedPdfFailureExplainsThatTextExtractionIsRequired() {
+        byte[] blankPdf;
+        try (org.apache.pdfbox.pdmodel.PDDocument document = new org.apache.pdfbox.pdmodel.PDDocument();
+             java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream()) {
+            document.addPage(new org.apache.pdfbox.pdmodel.PDPage());
+            document.save(output);
+            blankPdf = output.toByteArray();
+        } catch (java.io.IOException exception) {
+            throw new IllegalStateException("Could not create test PDF", exception);
+        }
+        IngestionRequest pdfRequest = new IngestionRequest("doc-scanned-pdf", "Scanned PDF", "ENGINEERING",
+                "INTERNAL", Set.of("ENGINEERING"), "scanned.pdf", blankPdf, null);
+
+        assertThatThrownBy(() -> ingestionService.ingest(pdfRequest))
+                .isInstanceOf(IngestionException.class)
+                .hasMessage("PDF contains no extractable text; scanned PDFs are unsupported");
+        assertThat(jdbc.queryForObject("SELECT status FROM ingestion_jobs WHERE document_id = ?",
+                String.class, "doc-scanned-pdf")).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("SELECT error_message FROM ingestion_jobs WHERE document_id = ?",
+                String.class, "doc-scanned-pdf"))
+                .isEqualTo("PDF contains no extractable text; scanned PDFs are unsupported");
+    }
+
+    @Test
+    void textPdfCanBePersistedAsChunks() throws Exception {
+        byte[] pdf;
+        try (org.apache.pdfbox.pdmodel.PDDocument document = new org.apache.pdfbox.pdmodel.PDDocument();
+             java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream()) {
+            org.apache.pdfbox.pdmodel.PDPage page = new org.apache.pdfbox.pdmodel.PDPage();
+            document.addPage(page);
+            try (org.apache.pdfbox.pdmodel.PDPageContentStream stream =
+                         new org.apache.pdfbox.pdmodel.PDPageContentStream(document, page)) {
+                stream.beginText();
+                stream.setFont(new org.apache.pdfbox.pdmodel.font.PDType1Font(
+                        org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA), 12);
+                stream.newLineAtOffset(50, 700);
+                stream.showText("OKR cheatsheet");
+                stream.endText();
+            }
+            document.save(output);
+            pdf = output.toByteArray();
+        }
+        IngestionRequest pdfRequest = new IngestionRequest("doc-pdf-text", "PDF Text", "ENGINEERING",
+                "INTERNAL", Set.of("ENGINEERING"), "OKR_cheatsheet.pdf", pdf, null);
+
+        IngestionResult result = ingestionService.ingest(pdfRequest);
+
+        assertThat(result.chunkCount()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT chunk_text FROM document_chunks WHERE document_version_id = ?",
+                String.class, result.versionId())).isEqualTo("OKR cheatsheet");
+    }
+
+    @Test
     void replacementPermissionsActivateOnlyAlongsideSuccessfulNewVersion() {
         byte[] original = "# Policy\nOriginal".getBytes(StandardCharsets.UTF_8);
         ingestionService.ingest(new IngestionRequest("doc-permission-version", "Policy", "ENGINEERING", "INTERNAL",

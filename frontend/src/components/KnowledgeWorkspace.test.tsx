@@ -9,7 +9,7 @@ describe('KnowledgeWorkspace upload errors', () => {
       ['INGESTION_INVALID_INPUT', 'Uploaded file content does not match its filename extension', /Upload rejected/],
       ['INGESTION_CONFLICT', 'inactive or already being indexed', /Restore inactive documents or wait for indexing/],
       ['INGESTION_PROVIDER_UNAVAILABLE', 'provider unavailable', /embedding service is temporarily unavailable/i],
-      ['INGESTION_UNPROCESSABLE', 'PDF contains no extractable text; scanned PDFs are unsupported', /could not be indexed/i],
+      ['INGESTION_UNPROCESSABLE', 'PDF contains no extractable text; scanned PDFs are unsupported', /scanned PDFs are not supported/i],
     ] as const
 
     for (const [code, message, expected] of messages) {

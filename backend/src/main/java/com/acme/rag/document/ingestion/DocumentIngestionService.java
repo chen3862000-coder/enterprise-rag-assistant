@@ -12,6 +12,9 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 @Service
 public class DocumentIngestionService {
+    private static final java.util.Set<String> SAFE_PDF_FAILURES = java.util.Set.of(
+            "PDF contains no extractable text; scanned PDFs are unsupported",
+            "Unable to parse PDF document");
     private final UploadValidator validator;
     private final DocumentVersionRepository versions;
     private final EmbeddingService embeddings;
@@ -79,8 +82,19 @@ public class DocumentIngestionService {
         } catch (IllegalArgumentException | DataAccessException exception) {
             versions.fail(upload.documentId(), reservation, exception);
             metrics.ingestion(false);
-            throw new IngestionException(IngestionException.Kind.UNPROCESSABLE, "Document indexing failed", exception);
+            throw new IngestionException(IngestionException.Kind.UNPROCESSABLE, safeFailureMessage(exception), exception);
         }
+    }
+
+    private static String safeFailureMessage(RuntimeException exception) {
+        Throwable cause = exception;
+        while (cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        if (cause instanceof IllegalArgumentException && SAFE_PDF_FAILURES.contains(cause.getMessage())) {
+            return cause.getMessage();
+        }
+        return "Document indexing failed";
     }
 
     boolean isActiveContent(String documentId, byte[] content) {

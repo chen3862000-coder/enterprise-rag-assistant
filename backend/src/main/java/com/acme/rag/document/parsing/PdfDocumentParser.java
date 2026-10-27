@@ -23,7 +23,7 @@ public class PdfDocumentParser implements DocumentParser {
             for (int page = 1; page <= pdf.getNumberOfPages(); page++) {
                 stripper.setStartPage(page);
                 stripper.setEndPage(page);
-                String text = stripper.getText(pdf).strip();
+                String text = normalizeExtractedText(stripper.getText(pdf));
                 if (!text.isEmpty()) {
                     sections.add(new ParsedDocument.Section("", text, page));
                 }
@@ -35,5 +35,9 @@ public class PdfDocumentParser implements DocumentParser {
     } catch (IOException e) {
             throw new IllegalArgumentException("Unable to parse PDF document", e);
         }
+    }
+
+    static String normalizeExtractedText(String text) {
+        return text.replace('\0', ' ').strip();
     }
 }

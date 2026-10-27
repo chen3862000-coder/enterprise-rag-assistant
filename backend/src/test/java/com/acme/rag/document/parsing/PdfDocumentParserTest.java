@@ -25,6 +25,12 @@ class PdfDocumentParserTest {
     }
 
     @Test
+    void replacesNullCharactersInExtractedText() {
+        assertThat(PdfDocumentParser.normalizeExtractedText("  OKR\u0000cheatsheet  "))
+                .isEqualTo("OKR cheatsheet");
+    }
+
+    @Test
     void rejectsCorruptedPdfAsUnprocessableContent() {
         assertThatThrownBy(() -> parser.parse("%PDF-not-a-pdf".getBytes(java.nio.charset.StandardCharsets.US_ASCII)))
                 .isInstanceOf(IllegalArgumentException.class)

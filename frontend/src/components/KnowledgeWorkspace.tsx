@@ -117,6 +117,9 @@ export function uploadErrorMessage(cause: unknown) {
   const code = 'code' in cause ? cause.code : undefined
   if (code === 'INGESTION_INVALID_INPUT') return `Upload rejected: ${cause.message}`
   if (code === 'INGESTION_CONFLICT') return 'This document is inactive or already being indexed. Restore inactive documents or wait for indexing to finish, then retry.'
+  if (code === 'INGESTION_UNPROCESSABLE' && cause.message === 'PDF contains no extractable text; scanned PDFs are unsupported') {
+    return 'This PDF contains no extractable text. Scanned PDFs are not supported; upload a text-based PDF instead.'
+  }
   if (code === 'INGESTION_UNPROCESSABLE') return `Document could not be indexed: ${cause.message}`
   if (code === 'INGESTION_PROVIDER_UNAVAILABLE') return 'The embedding service is temporarily unavailable. Your active document version was not replaced; retry later.'
   return cause.message || 'Upload failed. Check the file and document details, then retry.'

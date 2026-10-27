@@ -150,7 +150,7 @@ sequenceDiagram
     participant Embed as Ollama
 
     Admin->>API: upload / reindex + metadata + allowed roles
-    API->>API: require documentAdmin; map request
+    API->>API: require documentAdmin and map request
     API->>App: ingest(request)
     App->>App: validate type, size, content, metadata; hash content
     App->>DB: reserve document/version under transaction lock

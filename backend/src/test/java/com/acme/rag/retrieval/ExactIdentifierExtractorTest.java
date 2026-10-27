@@ -12,4 +12,10 @@ class ExactIdentifierExtractorTest {
         assertThat(extractor.extract("How should I handle HTTP 429 and GW-204 from API/v1?"))
                 .containsExactly("429", "gw-204", "api/v1");
     }
+
+    @Test
+    void excludesSentenceEndingPeriodsButPreservesInternalDots() {
+        assertThat(extractor.extract("Check IR-204. Then call API.v1."))
+                .containsExactly("ir-204", "api.v1");
+    }
 }

@@ -16,7 +16,7 @@ public final class ExactIdentifierExtractor {
         Matcher matcher = IDENTIFIER.matcher(query);
         Set<String> identifiers = new LinkedHashSet<>();
         while (matcher.find()) {
-            String identifier = matcher.group().toLowerCase(Locale.ROOT);
+            String identifier = matcher.group().replaceFirst("\\.+$", "").toLowerCase(Locale.ROOT);
             if (identifier.length() <= 64) {
                 identifiers.add(identifier);
             }

@@ -20,7 +20,7 @@ False-abstention rate uses answerable fixtures only when an expected document re
 
 ## Latest Local Measurement
 
-The v5 run `2ce9ea94-fed7-4acf-aa5b-ec2c558d73c5` completed successfully against 63 scenarios: Recall@5 1.000, MRR 0.912, ACL leakage 0, freshness accuracy 1.000, evidence-gate accuracy 0.937, false-abstention rate 11.4%, and false-admission rate 0.0%. The persisted release-quality flag is `PASS`. Four relevant authorized candidates were false-abstained (`rag-005`, `rag-020`, `rag-028`, and `rag-051`); there were no false admissions. This is a local synthetic-corpus measurement, not generated-answer correctness or a CI result.
+The latest v5 run `84bf669d-8fe2-468c-8bc4-46d23198e8e5` completed successfully against 63 scenarios: Recall@5 1.000, MRR 0.912, ACL leakage 0, freshness accuracy 1.000, citation-ID validation accuracy 1.000, evidence-gate accuracy 0.968, false-abstention rate 5.7%, and false-admission rate 0.0%. The persisted release-quality flag is `PASS`. Two relevant authorized candidates remain false-abstained (`rag-020` and `rag-028`); there were no false admissions. Compared with the preceding v5 run, targeted rollback-phrase normalization fixed `rag-051`, improving gate accuracy from 0.937 to 0.968 and reducing false abstention from 11.4% to 5.7%, with other aggregate metrics unchanged. This is a local synthetic-corpus measurement, not generated-answer correctness or a CI result.
 
 ## Optional Future Live Evaluation
 

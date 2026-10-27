@@ -61,7 +61,10 @@ final class RetrievalIntentPolicy {
         Set<String> identifiers = new HashSet<>();
         var matcher = TECHNICAL_ID.matcher(query);
         while (matcher.find()) {
-            String identifier = matcher.group();
+            String identifier = matcher.group().replaceFirst("\\.+$", "");
+            if (identifier.isEmpty()) {
+                continue;
+            }
             boolean hasLetter = identifier.codePoints().anyMatch(Character::isLetter);
             if (hasLetter || isNamedNumericCode(query, identifier)) {
                 identifiers.add(identifier.toLowerCase(Locale.ROOT));
@@ -165,7 +168,8 @@ final class RetrievalIntentPolicy {
 
     private static boolean containsExactIdentifier(String text, String identifier) {
         Pattern token = Pattern.compile("(?<![\\p{Alnum}_./:-])" + Pattern.quote(identifier)
-                + "(?![\\p{Alnum}_./:-])", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
+                + "(?:\\.+(?=$|[^\\p{Alnum}_/:.-]))?(?![\\p{Alnum}_./:-])",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
         return token.matcher(text).find();
     }
 

@@ -56,6 +56,7 @@ class HybridRetrievalSecurityIT {
     }
 
     @Autowired HybridRetrievalRepository retrieval;
+    @Autowired HybridRetrievalService retrievalService;
     @Autowired SourceRepository sources;
     @Autowired EvaluationDatasetLoader datasetLoader;
     @Autowired EvaluationScenarioEvaluator scenarioEvaluator;
@@ -110,10 +111,50 @@ class HybridRetrievalSecurityIT {
 
     @Test
     void exactIdentifierSearchRequiresWholeIdentifierToken() {
-        assertThat(retrieval.exact("IR-20", Set.of("SECURITY_ADMIN", "PUBLIC"), 20))
+        jdbc.update("UPDATE document_chunks SET chunk_text = 'Restricted incident IR-204.' "
+                + "WHERE id = 'doc-security-v1-c0'");
+        String identifier = new ExactIdentifierExtractor().extract("What happened in IR-204.").getFirst();
+
+        assertThat(retrieval.exact(new ExactIdentifierExtractor().extract("What happened in IR-20?").getFirst(),
+                Set.of("SECURITY_ADMIN", "PUBLIC"), 20))
                 .isEmpty();
-        assertThat(retrieval.exact("IR-204", Set.of("SECURITY_ADMIN", "PUBLIC"), 20))
+        assertThat(retrieval.exact(identifier, Set.of("SECURITY_ADMIN", "PUBLIC"), 20))
                 .extracting(RetrievalCandidate::documentId).containsExactly("doc-security");
+    }
+
+    @Test
+    void exactIdentifierSearchKeepsInternalDotsSignificant() {
+        jdbc.update("UPDATE document_chunks SET chunk_text = 'The API.1 endpoint is available.' "
+                + "WHERE id = 'doc-public-v1-c0'");
+
+        ExactIdentifierExtractor extractor = new ExactIdentifierExtractor();
+        assertThat(retrieval.exact(extractor.extract("Call API.1.").getFirst(), Set.of("PUBLIC"), 20))
+                .extracting(RetrievalCandidate::documentId).containsExactly("doc-public");
+        assertThat(retrieval.exact(extractor.extract("Call API1.").getFirst(), Set.of("PUBLIC"), 20)).isEmpty();
+    }
+
+    @Test
+    void rolledBackQueryMatchesRollbackSourceAndPassesEvidenceGate() {
+        jdbc.update("UPDATE document_chunks SET chunk_text = 'For the current gateway deployment, restore the most recent healthy artifact during rollback.' "
+                + "WHERE id = 'doc-engineering-v1-c0'");
+
+        var result = retrievalService.retrieveForEvaluation(
+                "How should the current gateway deployment be rolled back?", Set.of("ENGINEERING"),
+                Set.of("doc-engineering"));
+
+        assertThat(result.evidenceSufficient()).isTrue();
+        assertThat(result.gateReason()).isEqualTo("LEXICAL_AND_RELEVANCE_MATCH");
+        assertThat(result.chunks()).extracting(RankedChunk::documentId).contains("doc-engineering");
+    }
+
+    @Test
+    void rollbackPhraseNormalizationDoesNotMatchUnrelatedTerms() {
+        jdbc.update("UPDATE document_chunks SET chunk_text = 'The procedure is rollback.' "
+                + "WHERE id = 'doc-engineering-v1-c0'");
+
+        assertThat(retrieval.keyword("rolled forward", Set.of("ENGINEERING"), 20)).isEmpty();
+        assertThat(retrieval.keyword("roll back", Set.of("ENGINEERING"), 20)).extracting(RetrievalCandidate::documentId)
+                .containsExactly("doc-engineering");
     }
 
     @Test

@@ -40,6 +40,7 @@ public class HybridRetrievalRepository {
     }
 
     public List<RetrievalCandidate> keyword(String query, Set<String> roles, int depth) {
+        String normalizedQuery = normalizeRollbackPhrase(query);
         return jdbc.sql("""
                 WITH lexical AS (
                     SELECT to_tsquery('english', nullif(array_to_string(
@@ -55,12 +56,16 @@ public class HybridRetrievalRepository {
                          WHERE c.search_vector @@ plainto_tsquery('english', query_term)) AS matched_terms
                 """ + KEYWORD_AUTHORIZED_FROM
                 + " ORDER BY rank DESC, c.id ASC LIMIT :depth")
-                .param("query", query).param("roles", roles).param("depth", depth)
+                .param("query", normalizedQuery).param("roles", roles).param("depth", depth)
                 .query((rs, row) -> candidate(rs.getString("id"), rs.getObject("version_id", UUID.class),
                         rs.getString("document_id"), rs.getString("title"), rs.getInt("version_number"),
                         rs.getString("heading_path"), rs.getString("chunk_text"), rs.getDouble("rank"), false, true,
                         false, coverage(rs.getLong("matched_terms"), rs.getLong("term_count"))))
                 .list();
+    }
+
+    private static String normalizeRollbackPhrase(String query) {
+        return query.replaceAll("(?i)\\broll(?:ed)?\\s+back\\b", "rollback");
     }
 
     private static final String KEYWORD_AUTHORIZED_FROM = """
@@ -81,7 +86,8 @@ public class HybridRetrievalRepository {
                 SELECT c.id, v.id AS version_id, d.id AS document_id, d.title, v.version_number,
                        c.heading_path, c.chunk_text, 1.0 AS rank
                 """ + AUTHORIZED_FROM + " AND lower(:identifier) = ANY("
-                + "regexp_split_to_array(lower(c.chunk_text), '[^[:alnum:]_./:-]+')) "
+                + "ARRAY(SELECT rtrim(token, '.') FROM unnest("
+                + "regexp_split_to_array(lower(c.chunk_text), '[^[:alnum:]_./:-]+')) token)) "
                 + "ORDER BY c.id ASC LIMIT :depth")
                 .param("identifier", identifier).param("roles", roles).param("depth", depth)
                 .query((rs, row) -> candidate(rs.getString("id"), rs.getObject("version_id", UUID.class),

@@ -64,12 +64,16 @@ class DocumentVersionRepository {
     void activate(String documentId, Set<String> roles, VersionReservation reservation,
                   List<DocumentChunk> chunks, List<float[]> vectors) {
         transactions.executeWithoutResult(status -> {
-            lockDocument(documentId);
+            String documentStatus = lockDocument(documentId);
+            if (!"ACTIVE".equals(documentStatus)) {
+                throw new IngestionException(IngestionException.Kind.CONFLICT,
+                        "Restore the inactive document before activating a version");
+            }
             updateMetadata(documentId, reservation.metadata());
             persistChunks(documentId, reservation, chunks, vectors);
             jdbc.update("UPDATE document_versions SET index_status = 'SUPERSEDED' WHERE document_id = ? AND index_status = 'ACTIVE'", documentId);
             jdbc.update("UPDATE document_versions SET index_status = 'ACTIVE' WHERE id = ? AND index_status = 'INDEXING'", reservation.versionId());
-            jdbc.update("UPDATE documents SET current_version_id = ?, status = 'ACTIVE', updated_at = now() WHERE id = ?",
+            jdbc.update("UPDATE documents SET current_version_id = ?, updated_at = now() WHERE id = ? AND status = 'ACTIVE'",
                     reservation.versionId(), documentId);
             replacePermissions(documentId, roles);
             jdbc.update("UPDATE ingestion_jobs SET status = 'SUCCEEDED', completed_at = now() WHERE id = ?", reservation.jobId());
@@ -95,7 +99,8 @@ class DocumentVersionRepository {
                     reservation.versionId());
             jdbc.update("UPDATE ingestion_jobs SET status = 'FAILED', error_message = ?, completed_at = now() WHERE id = ?",
                     safeMessage, reservation.jobId());
-            jdbc.update("UPDATE documents SET status = 'DISABLED' WHERE id = ? AND current_version_id IS NULL", documentId);
+            jdbc.update("UPDATE documents SET status = 'DISABLED' "
+                    + "WHERE id = ? AND status = 'ACTIVE' AND current_version_id IS NULL", documentId);
         });
     }
 
@@ -204,8 +209,8 @@ class DocumentVersionRepository {
         }
     }
 
-    private void lockDocument(String documentId) {
-        client.sql("SELECT id FROM documents WHERE id = :id FOR UPDATE")
+    private String lockDocument(String documentId) {
+        return client.sql("SELECT status FROM documents WHERE id = :id FOR UPDATE")
                 .param("id", documentId).query(String.class).single();
     }
 

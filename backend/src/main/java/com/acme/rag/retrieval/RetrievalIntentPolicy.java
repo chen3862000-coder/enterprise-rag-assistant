@@ -71,7 +71,7 @@ final class RetrievalIntentPolicy {
             return List.of();
         }
         return chunks.stream().filter(RankedChunk::exactMatch)
-                .filter(chunk -> identifiers.stream().anyMatch(identifier -> containsIgnoreCase(chunk.text(), identifier)))
+                .filter(chunk -> identifiers.stream().anyMatch(identifier -> containsExactIdentifier(chunk.text(), identifier)))
                 .toList();
     }
 
@@ -163,8 +163,10 @@ final class RetrievalIntentPolicy {
                 .filter(term -> term.length() > 2).collect(java.util.stream.Collectors.toSet());
     }
 
-    private static boolean containsIgnoreCase(String text, String value) {
-        return text.toLowerCase(Locale.ROOT).contains(value.toLowerCase(Locale.ROOT));
+    private static boolean containsExactIdentifier(String text, String identifier) {
+        Pattern token = Pattern.compile("(?<![\\p{Alnum}_./:-])" + Pattern.quote(identifier)
+                + "(?![\\p{Alnum}_./:-])", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
+        return token.matcher(text).find();
     }
 
     private static boolean isNamedNumericCode(String query, String identifier) {

@@ -154,6 +154,42 @@ class DocumentIngestionServiceIT {
     }
 
     @Test
+    void disableOrDeleteDuringEmbeddingPreventsVersionActivation() throws Exception {
+        for (boolean delete : List.of(false, true)) {
+            String documentId = delete ? "doc-delete-during-index" : "doc-disable-during-index";
+            ingestionService.ingest(request(documentId, "Existing active content"));
+            UUID activeBefore = jdbc.queryForObject("SELECT current_version_id FROM documents WHERE id = ?",
+                    UUID.class, documentId);
+            java.util.concurrent.CountDownLatch embeddingStarted = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.CountDownLatch finishEmbedding = new java.util.concurrent.CountDownLatch(1);
+            EmbeddingModel blockingModel = blockingEmbeddingModel(embeddingStarted, finishEmbedding);
+            DocumentIngestionService blockedIngestion = ingestionService(blockingModel);
+            var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+            try {
+                var ingest = executor.submit(() -> blockedIngestion.ingest(request(documentId, "New pending content")));
+                assertThat(embeddingStarted.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+                boolean changed = delete ? documentManagement.delete(documentId) : documentManagement.disable(documentId);
+                assertThat(changed).isTrue();
+                finishEmbedding.countDown();
+
+                assertThatThrownBy(() -> ingest.get(10, java.util.concurrent.TimeUnit.SECONDS))
+                        .hasCauseInstanceOf(IngestionException.class)
+                        .hasRootCauseMessage("Restore the inactive document before activating a version");
+                assertThat(jdbc.queryForObject("SELECT status FROM documents WHERE id = ?", String.class, documentId))
+                        .isEqualTo(delete ? "DELETED" : "DISABLED");
+                assertThat(jdbc.queryForObject("SELECT current_version_id FROM documents WHERE id = ?",
+                        UUID.class, documentId)).isEqualTo(activeBefore);
+                assertThat(jdbc.queryForObject("SELECT index_status FROM document_versions WHERE document_id = ? "
+                        + "ORDER BY version_number DESC LIMIT 1", String.class, documentId)).isEqualTo("FAILED");
+            } finally {
+                finishEmbedding.countDown();
+                executor.shutdownNow();
+            }
+        }
+    }
+
+    @Test
     void activeContentLookupIsDeterministicForSeedRestartCheck() {
         IngestionRequest request = request("doc-seed-restart", "Stable current policy");
         ingestionService.ingest(request);
@@ -220,6 +256,53 @@ class DocumentIngestionServiceIT {
 
         assertThat(jdbc.queryForList("SELECT allowed_role FROM document_permissions WHERE document_id = ?", String.class,
                 "doc-permission-version")).containsExactly("ENGINEERING");
+    }
+
+    private DocumentIngestionService ingestionService(EmbeddingModel model) {
+        List<DocumentParser> parsers = List.of(new TextDocumentParser(), new PdfDocumentParser());
+        TransactionTemplate transactionTemplate = new TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+        return new DocumentIngestionService(new UploadValidator(new UploadContentValidator(parsers, 10_485_760)),
+                new DocumentVersionRepository(jdbc, org.springframework.jdbc.core.simple.JdbcClient.create(jdbc),
+                        transactionTemplate, "test-model", 768), new EmbeddingService(model, 768), parsers,
+                new DocumentChunker(1800, 240),
+                new RagMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
+    }
+
+    private static EmbeddingModel blockingEmbeddingModel(java.util.concurrent.CountDownLatch embeddingStarted,
+                                                         java.util.concurrent.CountDownLatch finishEmbedding) {
+        return new EmbeddingModel() {
+            @Override
+            public float[] embed(org.springframework.ai.document.Document document) {
+                return vector();
+            }
+
+            @Override
+            public EmbeddingResponse call(org.springframework.ai.embedding.EmbeddingRequest request) {
+                embeddingStarted.countDown();
+                try {
+                    if (!finishEmbedding.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out waiting to finish test embedding");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Test embedding interrupted", exception);
+                }
+                return new EmbeddingResponse(request.getInstructions().stream()
+                        .map(text -> new org.springframework.ai.embedding.Embedding(vector(), 0)).toList());
+            }
+
+            @Override
+            public int dimensions() {
+                return 768;
+            }
+
+            private float[] vector() {
+                float[] vector = new float[768];
+                vector[0] = 1.0f;
+                return vector;
+            }
+        };
     }
 
     private static IngestionRequest request(String id, String text) {

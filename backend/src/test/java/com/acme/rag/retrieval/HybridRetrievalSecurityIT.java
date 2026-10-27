@@ -109,6 +109,14 @@ class HybridRetrievalSecurityIT {
     }
 
     @Test
+    void exactIdentifierSearchRequiresWholeIdentifierToken() {
+        assertThat(retrieval.exact("IR-20", Set.of("SECURITY_ADMIN", "PUBLIC"), 20))
+                .isEmpty();
+        assertThat(retrieval.exact("IR-204", Set.of("SECURITY_ADMIN", "PUBLIC"), 20))
+                .extracting(RetrievalCandidate::documentId).containsExactly("doc-security");
+    }
+
+    @Test
     void disabledAndSupersededDocumentsAreExcludedFromEverySearchPath() {
         jdbc.update("UPDATE documents SET status = 'DISABLED' WHERE id = 'doc-engineering'");
         Set<String> aliceRoles = Set.of("PUBLIC", "ENGINEERING");
@@ -258,21 +266,27 @@ class HybridRetrievalSecurityIT {
         String documentId = "doc-first-create-race";
         java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(2);
         java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
-        var first = java.util.concurrent.CompletableFuture.supplyAsync(() -> concurrentIngest(documentId,
-                "Seeded", "seed.txt", "seed content", ready, start));
-        var second = java.util.concurrent.CompletableFuture.supplyAsync(() -> concurrentIngest(documentId,
-                "Seeded v2", "seed-v2.txt", "second content", ready, start));
-        ready.await();
-        start.countDown();
-        IngestionResult firstResult = first.join();
-        IngestionResult secondResult = second.join();
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> concurrentIngest(documentId,
+                    "Seeded", "seed.txt", "seed content", ready, start));
+            var second = executor.submit(() -> concurrentIngest(documentId,
+                    "Seeded v2", "seed-v2.txt", "second content", ready, start));
+            assertThat(ready.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            IngestionResult firstResult = first.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            IngestionResult secondResult = second.get(10, java.util.concurrent.TimeUnit.SECONDS);
 
-        assertThat(firstResult.version()).isNotEqualTo(secondResult.version());
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM documents WHERE id = ?", Integer.class, documentId)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM document_versions WHERE document_id = ?",
-                Integer.class, documentId)).isEqualTo(2);
-        assertThat(jdbc.queryForList("SELECT allowed_role FROM document_permissions WHERE document_id = ?", String.class, documentId))
-                .containsExactly("PUBLIC");
+            assertThat(firstResult.version()).isNotEqualTo(secondResult.version());
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM documents WHERE id = ?", Integer.class, documentId)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM document_versions WHERE document_id = ?",
+                    Integer.class, documentId)).isEqualTo(2);
+            assertThat(jdbc.queryForList("SELECT allowed_role FROM document_permissions WHERE document_id = ?", String.class, documentId))
+                    .containsExactly("PUBLIC");
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
     }
 
     private IngestionResult concurrentIngest(String documentId, String title, String filename, String content,

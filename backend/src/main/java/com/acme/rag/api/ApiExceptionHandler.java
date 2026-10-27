@@ -6,6 +6,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.acme.rag.document.ingestion.IngestionException;
+import com.acme.rag.generation.ChatServiceException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -36,6 +37,12 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiError> storageUnavailable(DataAccessException exception) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(new ApiError("STORAGE_UNAVAILABLE", "Document storage is temporarily unavailable"));
+    }
+
+    @ExceptionHandler(ChatServiceException.class)
+    public ResponseEntity<ApiError> chatService(ChatServiceException exception) {
+        return ResponseEntity.status(exception.status())
+                .body(new ApiError(exception.code(), exception.safeMessage()));
     }
 
     @ExceptionHandler({IllegalArgumentException.class, MethodArgumentNotValidException.class,

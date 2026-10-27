@@ -91,6 +91,33 @@ class ChatServiceTest {
         verify(sources, never()).findAuthorized(any(), anySet());
     }
 
+    @Test
+    void retrievalFailureIsRecordedAndPropagatedAsServiceFailure() {
+        org.springframework.dao.DataAccessResourceFailureException failure =
+                new org.springframework.dao.DataAccessResourceFailureException("database unavailable");
+        when(retrieval.retrieve("What is the API limit?")).thenThrow(failure);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.chat("What is the API limit?"))
+                .isInstanceOf(ChatServiceException.class)
+                .hasMessage("Document storage is temporarily unavailable")
+                .hasCause(failure);
+
+        org.mockito.ArgumentCaptor<com.acme.rag.observability.RagTrace> trace =
+                org.mockito.ArgumentCaptor.forClass(com.acme.rag.observability.RagTrace.class);
+        verify(traces).save(trace.capture(), any());
+        assertThat(trace.getValue().status()).isEqualTo("FAILED");
+        assertThat(trace.getValue().groundingStatus()).isEqualTo("REQUEST_FAILED");
+    }
+
+    @Test
+    void invalidQueryRemainsAClientErrorInsteadOfEvidenceAbstention() {
+        when(retrieval.retrieve("bad query")).thenThrow(new IllegalArgumentException("invalid query detail"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.chat("bad query"))
+                .isInstanceOf(ChatServiceException.class)
+                .hasMessage("The chat request is invalid");
+    }
+
     private static RankedChunk chunk() {
         return new RankedChunk("doc-policy-v1-c0", UUID.randomUUID(), "doc-policy", "Policy", 1,
                 "Limits", "The Enterprise API limit is 1000 per minute.", 0.01, 0.8, 0.5, false);

@@ -159,6 +159,18 @@ class EvidenceSufficiencyGateTest {
     }
 
     @Test
+    void shorterIdentifierDoesNotTreatLongerIdentifierAsAnExactMatch() {
+        RankedChunk longerIdentifier = new RankedChunk("incident", UUID.randomUUID(), "doc-security", "Incident", 1,
+                "Exercise", "The restricted incident is IR-204.", 0.01, 0.1, 0.0, true, 0.0);
+
+        EvidenceSufficiencyGate.Decision decision = gate.evaluate("What happened in IR-20?", List.of(longerIdentifier));
+
+        assertThat(decision.sufficient()).isFalse();
+        assertThat(decision.reason()).isNotEqualTo("EXACT_IDENTIFIER_MATCH");
+        assertThat(decision.chunks()).isEmpty();
+    }
+
+    @Test
     void releaseThresholdsExposeFalseAdmissionRisk() {
         assertThat(EvidenceSufficiencyGate.Diagnostic.releaseThresholdsMet(0.1, 0.05, 0)).isTrue();
         assertThat(EvidenceSufficiencyGate.Diagnostic.releaseThresholdsMet(0.1, 0.06, 0)).isFalse();

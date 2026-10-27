@@ -4,7 +4,7 @@ An authenticated query is normalized, embedded with the separately configured Ol
 
 1. Exact cosine-distance search in pgvector.
 2. PostgreSQL full-text search over the generated `tsvector`.
-3. Exact substring search for extracted technical identifiers such as error codes and API identifiers.
+3. Token-bounded exact search for extracted technical identifiers such as error codes and API identifiers; a shorter identifier does not match inside a longer token.
 
 Every path applies the same document role, enabled-status, and active-version predicates in SQL. Only authorized candidates are returned to the retrieval service. Reciprocal Rank Fusion merges lists without comparing incompatible raw scores and deduplicates on stable chunk IDs.
 

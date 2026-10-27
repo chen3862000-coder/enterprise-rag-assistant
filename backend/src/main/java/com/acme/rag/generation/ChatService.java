@@ -12,6 +12,7 @@ import com.acme.rag.document.ingestion.ContentHasher;
 import java.util.UUID;
 import java.time.Instant;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 @Service
@@ -56,7 +57,8 @@ public class ChatService {
         try {
             return executeChat(message, traceId, principal.username(), createdAt, startedNanos, progress);
         } catch (RuntimeException exception) {
-            return failedChat(message, traceId, principal.username(), createdAt, startedNanos, exception, progress);
+            failedChat(message, traceId, principal.username(), createdAt, startedNanos, exception, progress);
+            throw serviceFailure(exception);
         }
     }
 
@@ -137,20 +139,38 @@ public class ChatService {
         return response;
     }
 
-    private ChatResponse failedChat(String message, String traceId, String username, Instant createdAt,
-                                    long startedNanos, RuntimeException exception, RequestProgress progress) {
+    private void failedChat(String message, String traceId, String username, Instant createdAt,
+                            long startedNanos, RuntimeException exception, RequestProgress progress) {
         var failedRetrieval = progress.retrievalResult == null
                 ? new com.acme.rag.retrieval.RetrievalResult(java.util.List.of(), 0, 0, 0,
                         false, "REQUEST_FAILED", 0, java.util.List.of(),
                         com.acme.rag.retrieval.EvidenceSufficiencyGate.Diagnostic.empty(0))
                 : progress.retrievalResult;
-        String grounding = "INSUFFICIENT_EVIDENCE";
-        var response = new ChatResponse("The request could not be completed safely. Please retry.",
-                java.util.List.of(), traceId, grounding);
+        String grounding = "REQUEST_FAILED";
         persistTrace(traceId, username, message, createdAt, progress.retrievalNanos, progress.generationNanos,
                 System.nanoTime() - startedNanos, failedRetrieval, progress.contextCount, 0,
                 grounding, "FAILED", errorCategory(exception));
-        return response;
+    }
+
+    private static ChatServiceException serviceFailure(RuntimeException exception) {
+        if (exception instanceof IllegalArgumentException) {
+            return new ChatServiceException("INVALID_REQUEST", HttpStatus.BAD_REQUEST,
+                    "The chat request is invalid", exception);
+        }
+        if (exception instanceof org.springframework.ai.retry.NonTransientAiException) {
+            return new ChatServiceException("CHAT_PROVIDER_REJECTED", HttpStatus.BAD_GATEWAY,
+                    "The answer provider could not process the request", exception);
+        }
+        if (exception instanceof org.springframework.ai.retry.TransientAiException) {
+            return new ChatServiceException("CHAT_PROVIDER_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE,
+                    "The answer provider is temporarily unavailable", exception);
+        }
+        if (exception instanceof org.springframework.dao.DataAccessException) {
+            return new ChatServiceException("STORAGE_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE,
+                    "Document storage is temporarily unavailable", exception);
+        }
+        return new ChatServiceException("CHAT_FAILED", HttpStatus.INTERNAL_SERVER_ERROR,
+                "The chat request could not be completed", exception);
     }
 
     private static CitationResponseBuilder.ValidatedAnswer insufficient(String answer) {

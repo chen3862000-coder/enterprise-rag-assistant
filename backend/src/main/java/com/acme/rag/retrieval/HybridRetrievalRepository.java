@@ -80,7 +80,8 @@ public class HybridRetrievalRepository {
         return jdbc.sql("""
                 SELECT c.id, v.id AS version_id, d.id AS document_id, d.title, v.version_number,
                        c.heading_path, c.chunk_text, 1.0 AS rank
-                """ + AUTHORIZED_FROM + " AND position(lower(:identifier) in lower(c.chunk_text)) > 0 "
+                """ + AUTHORIZED_FROM + " AND lower(:identifier) = ANY("
+                + "regexp_split_to_array(lower(c.chunk_text), '[^[:alnum:]_./:-]+')) "
                 + "ORDER BY c.id ASC LIMIT :depth")
                 .param("identifier", identifier).param("roles", roles).param("depth", depth)
                 .query((rs, row) -> candidate(rs.getString("id"), rs.getObject("version_id", UUID.class),

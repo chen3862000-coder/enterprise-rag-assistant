@@ -152,7 +152,7 @@ sequenceDiagram
     Admin->>API: upload / reindex + metadata + allowed roles
     API->>API: require documentAdmin and map request
     API->>App: ingest(request)
-    App->>App: validate type, size, content, metadata; hash content
+    App->>App: validate type, size, and content metadata, then hash content
     App->>DB: reserve document/version under transaction lock
     DB-->>App: duplicate result or INDEXING reservation
     alt new or failed version
@@ -163,7 +163,7 @@ sequenceDiagram
         App->>DB: transactionally persist chunks and activate version
         DB-->>App: committed activation
     else identical active content
-        App-->>API: reuse result; apply metadata/ACL if changed
+        App-->>API: reuse result and apply metadata or ACL changes
     end
     App-->>API: ingestion result
     API-->>Admin: version/job result

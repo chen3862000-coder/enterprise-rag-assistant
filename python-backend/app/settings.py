@@ -25,8 +25,9 @@ class Settings(BaseSettings):
     candidate_depth: int = 10
     fused_depth: int = 8
     rrf_constant: int = 60
+    # Keep these aligned with backend application.yml; gate parity depends on them.
     minimum_vector_similarity: float = 0.35
-    minimum_keyword_score: float = 0.0005
+    minimum_keyword_score: float = 0.3
     generation_timeout_seconds: float = 30.0
 
 

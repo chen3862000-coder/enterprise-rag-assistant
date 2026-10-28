@@ -1,0 +1,55 @@
+services:
+  schema-init:
+    image: maven:3.9.11-eclipse-temurin-21
+    working_dir: /workspace
+    entrypoint: ["mvn"]
+    command:
+      - -B
+      - org.flywaydb:flyway-maven-plugin:12.4.0:migrate
+      - -Dflyway.url=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-enterprise_rag}
+      - -Dflyway.user=${POSTGRES_USER:-enterprise_rag}
+      - -Dflyway.password=${POSTGRES_PASSWORD:-local-rag-password}
+      - -Dflyway.locations=filesystem:/flyway/sql
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-enterprise_rag}
+      FLYWAY_USER: ${POSTGRES_USER:-enterprise_rag}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-local-rag-password}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+    volumes:
+      - ./backend/src/main/resources/db/migration:/flyway/sql:ro
+      - ./backend/pom.xml:/workspace/pom.xml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build:
+      context: python-backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-enterprise_rag}:${POSTGRES_PASSWORD:-local-rag-password}@postgres:5432/${POSTGRES_DB:-enterprise_rag}
+      OLLAMA_BASE_URL: http://ollama:11434
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_DIMENSIONS: 768
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      CHAT_MODEL_PROVIDER: ${CHAT_MODEL_PROVIDER:-none}
+      SEED_SYNTHETIC_DOCS: ${SEED_SYNTHETIC_DOCS:-true}
+      SEED_PATH: /app/synthetic-docs
+      TRACE_RETENTION_DAYS: ${TRACE_RETENTION_DAYS:-30}
+      DEV_EVALUATION_DATASET: /app/shared-evals/dataset.jsonl
+      HELDOUT_EVALUATION_DATASET: /app/evals/heldout-paraphrases.jsonl
+    volumes:
+      - ./synthetic-docs:/app/synthetic-docs:ro
+      - ./evals:/app/shared-evals:ro
+    depends_on:
+      schema-init:
+        condition: service_completed_successfully
+      ollama-model-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/actuator/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30

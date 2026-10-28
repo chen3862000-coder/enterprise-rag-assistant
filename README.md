@@ -25,9 +25,11 @@ All Acme Enterprise documents are synthetic and safe to publish.
 
 ## Architecture
 
+Two independently runnable backend implementations are available for comparison: Java/Spring Boot is the default, and Python/FastAPI is selected with the Compose override described in [`docs/python-backend.md`](docs/python-backend.md). Both use the same React frontend contract and Flyway-owned PostgreSQL schema. The Python implementation has documented known differences; no performance, security, or production-readiness comparison is claimed. See [`docs/backend-parity.md`](docs/backend-parity.md) for status and limitations.
+
 ```mermaid
 flowchart LR
-  UI[React + Vite] -->|same-origin session REST| API[Spring Boot modular monolith]
+  UI[React + Vite] -->|same-origin session REST| API[Selected backend: Spring Boot or FastAPI]
   API --> SEC[Demo identity + CSRF]
   API --> ING[Ingestion + atomic versions]
   API --> RET[ACL SQL + vector / text / exact + RRF]
@@ -54,6 +56,14 @@ docker compose up --build -d
 ```
 
 Open `http://localhost:3000`. The Compose stack runs PostgreSQL/pgvector, Ollama, one-time embedding-model setup, the Spring backend, and the React/Nginx frontend. Synthetic docs seed at backend startup. Ollama pulls `${EMBEDDING_MODEL:-nomic-embed-text}` into its persistent volume.
+
+To select the separate Python implementation without frontend source changes:
+
+```bash
+docker compose -f compose.yaml -f compose.python.yaml up --build --wait
+```
+
+Use the same Compose files with `down` to stop that selected project. Only one backend service is selected at a time; switching implementations requires a fresh demo login because each backend owns its own session cookie. Python-specific commands and limitations are documented in [`docs/python-backend.md`](docs/python-backend.md).
 
 The app login is a demo identity selector, not password authentication. Compose defaults `CHAT_MODEL_PROVIDER=none`, so it starts without paid credentials; chat still runs retrieval and the evidence gate, but generated prose is disabled. Set `DEEPSEEK_API_KEY` and `CHAT_MODEL_PROVIDER=deepseek` in `.env` to enable generation. Offline evaluation and tests do not require the key.
 

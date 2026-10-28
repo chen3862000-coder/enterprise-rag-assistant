@@ -61,6 +61,17 @@ class DocumentVersionRepository {
                 .param("documentId", documentId).query(Boolean.class).single());
     }
 
+    boolean isRetryableSeedDocument(String documentId) {
+        return Boolean.TRUE.equals(client.sql("""
+                        SELECT EXISTS (SELECT 1 FROM documents d WHERE d.id = :documentId
+                            AND d.status = 'DISABLED' AND d.seed_managed = true AND d.seed_repairable = true
+                            AND d.current_version_id IS NULL
+                            AND EXISTS (SELECT 1 FROM document_versions v WHERE v.document_id = d.id
+                                AND v.index_status = 'FAILED'))
+                        """)
+                .param("documentId", documentId).query(Boolean.class).single());
+    }
+
     void activate(String documentId, Set<String> roles, VersionReservation reservation,
                   List<DocumentChunk> chunks, List<float[]> vectors) {
         transactions.executeWithoutResult(status -> {
@@ -91,7 +102,7 @@ class DocumentVersionRepository {
                 metadata.title(), metadata.department(), metadata.classification(), documentId);
     }
 
-    void fail(String documentId, VersionReservation reservation, RuntimeException failure) {
+    void fail(String documentId, VersionReservation reservation, RuntimeException failure, boolean seedManaged) {
         transactions.executeWithoutResult(status -> {
             String message = failure.getMessage() == null ? "Indexing failed" : failure.getMessage();
             String safeMessage = message.substring(0, Math.min(message.length(), 500));
@@ -99,20 +110,43 @@ class DocumentVersionRepository {
                     reservation.versionId());
             jdbc.update("UPDATE ingestion_jobs SET status = 'FAILED', error_message = ?, completed_at = now() WHERE id = ?",
                     safeMessage, reservation.jobId());
-            jdbc.update("UPDATE documents SET status = 'DISABLED' "
-                    + "WHERE id = ? AND status = 'ACTIVE' AND current_version_id IS NULL", documentId);
+            boolean retryableProviderFailure = seedManaged && hasTransientProviderCause(failure);
+            if (retryableProviderFailure) {
+                jdbc.update("UPDATE documents SET status = 'DISABLED', seed_repairable = true "
+                        + "WHERE id = ? AND status = 'ACTIVE' AND current_version_id IS NULL "
+                        + "AND seed_managed = true", documentId);
+            } else {
+                jdbc.update("UPDATE documents SET status = 'DISABLED', seed_repairable = false "
+                        + "WHERE id = ? AND status = 'ACTIVE' AND current_version_id IS NULL", documentId);
+            }
         });
     }
 
     private VersionReservation reserveLocked(ValidatedUpload upload, String contentHash, UUID versionId, UUID jobId) {
         lockDocumentKey(upload.documentId());
-        Optional<String> documentStatus = client.sql("SELECT status FROM documents WHERE id = :id FOR UPDATE")
-                .param("id", upload.documentId()).query(String.class).optional();
-        if (documentStatus.isEmpty()) {
+        Optional<DocumentState> documentState = client.sql(
+                        "SELECT status, seed_managed, seed_repairable, current_version_id "
+                                + "FROM documents WHERE id = :id FOR UPDATE")
+                .param("id", upload.documentId())
+                .query((rs, row) -> new DocumentState(rs.getString("status"), rs.getBoolean("seed_managed"),
+                        rs.getBoolean("seed_repairable"), rs.getObject("current_version_id", UUID.class)))
+                .optional();
+        if (documentState.isEmpty()) {
             createDocument(upload);
-        } else if (!"ACTIVE".equals(documentStatus.get())) {
+        } else if (!"ACTIVE".equals(documentState.get().status())) {
+            DocumentState existing = documentState.get();
+            boolean retryableSeed = upload.seedManaged() && existing.seedManaged() && existing.seedRepairable()
+                    && existing.currentVersionId() == null && hasFailedVersion(upload.documentId());
+            if (retryableSeed) {
+                jdbc.update("UPDATE documents SET status = 'ACTIVE', seed_repairable = false WHERE id = ?",
+                        upload.documentId());
+            } else {
             throw new IngestionException(IngestionException.Kind.CONFLICT,
                     "Restore the inactive document before uploading or reindexing it");
+            }
+        } else if (upload.seedManaged()) {
+            jdbc.update("UPDATE documents SET seed_managed = true, seed_repairable = false WHERE id = ?",
+                    upload.documentId());
         }
         Optional<ExistingVersion> existing = findReusableVersion(upload.documentId(), contentHash);
         if (existing.isPresent()) {
@@ -126,9 +160,27 @@ class DocumentVersionRepository {
                 .param("documentId", documentId).query((rs, row) -> rs.getObject(1)).single();
     }
 
+    private boolean hasFailedVersion(String documentId) {
+        return Boolean.TRUE.equals(client.sql("SELECT EXISTS (SELECT 1 FROM document_versions "
+                        + "WHERE document_id = :id AND index_status = 'FAILED')")
+                .param("id", documentId).query(Boolean.class).single());
+    }
+
+    private static boolean hasTransientProviderCause(Throwable failure) {
+        Throwable cause = failure;
+        while (cause != null) {
+            if (cause instanceof org.springframework.ai.retry.TransientAiException) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
     private void createDocument(ValidatedUpload upload) {
-        jdbc.update("INSERT INTO documents (id, title, department, classification) VALUES (?, ?, ?, ?)",
-                upload.documentId(), upload.title(), upload.department(), upload.classification());
+        jdbc.update("INSERT INTO documents (id, title, department, classification, seed_managed) "
+                        + "VALUES (?, ?, ?, ?, ?)",
+                upload.documentId(), upload.title(), upload.department(), upload.classification(), upload.seedManaged());
         upload.roles().forEach(role -> jdbc.update(
                 "INSERT INTO document_permissions (document_id, allowed_role) VALUES (?, ?)", upload.documentId(), role));
     }
@@ -226,4 +278,7 @@ class DocumentVersionRepository {
     }
 
     private record ExistingVersion(UUID versionId, int version, String status) {}
+
+    private record DocumentState(String status, boolean seedManaged, boolean seedRepairable,
+                                 UUID currentVersionId) {}
 }

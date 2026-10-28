@@ -1,7 +1,13 @@
 import { spawn } from 'node:child_process'
 
-const composeFile = '../compose.yaml'
+const composeFiles = (process.env.E2E_COMPOSE_FILES ?? '../compose.yaml').split(',')
 const managedCompose = process.env.E2E_COMPOSE_MANAGED === 'true'
+const composeProject = process.env.E2E_COMPOSE_PROJECT
+
+function composeArgs(args) {
+  return [...(composeProject ? ['-p', composeProject] : []),
+    ...composeFiles.flatMap(file => ['-f', file]), ...args]
+}
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -13,10 +19,10 @@ function run(command, args) {
 
 async function main() {
   if (!managedCompose) {
-    const startup = await run('docker', ['compose', '-f', composeFile, 'up', '--build', '--detach', '--wait',
-      'postgres', 'ollama', 'backend', 'frontend'])
+    const startup = await run('docker', ['compose', ...composeArgs(['up', '--build', '--detach', '--wait',
+      'postgres', 'ollama', 'backend', 'frontend'])])
     if (startup !== 0) {
-      await run('docker', ['compose', '-f', composeFile, 'down'])
+      await run('docker', ['compose', ...composeArgs(['down'])])
       process.exitCode = startup
       return
     }
@@ -26,7 +32,7 @@ async function main() {
     process.exitCode = await run('npx', ['playwright', 'test'])
   } finally {
     if (!managedCompose) {
-      await run('docker', ['compose', '-f', composeFile, 'down'])
+      await run('docker', ['compose', ...composeArgs(['down'])])
     }
   }
 }

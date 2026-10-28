@@ -60,7 +60,8 @@ public class SyntheticSeedRunner implements ApplicationRunner {
         }
         String stem = filename.toString().replaceFirst("\\.[^.]+$", "");
         String documentId = logicalDocumentId(area, stem);
-        if (ingestionService.isInactiveDocument(documentId)) {
+        if (ingestionService.isInactiveDocument(documentId)
+                && !ingestionService.isRetryableSeedDocument(documentId)) {
             LOGGER.warn("Skipping inactive synthetic fixture {}; explicitly restore the document to reindex it", documentId);
             return;
         }
@@ -71,7 +72,7 @@ public class SyntheticSeedRunner implements ApplicationRunner {
         FixtureAccess access = accessFor(area);
         try {
             ingestionService.ingest(new IngestionRequest(documentId, title, access.department(), access.classification(), access.roles(),
-                    filename.toString(), Files.readAllBytes(file), Instant.now()));
+                    filename.toString(), Files.readAllBytes(file), Instant.now(), true));
         } catch (IOException e) {
             throw new IngestionException("Unable to read synthetic fixture: " + relative, e);
         }

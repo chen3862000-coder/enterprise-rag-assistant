@@ -33,7 +33,7 @@ final class UploadValidator {
                 .collect(Collectors.toUnmodifiableSet());
         validateRoles(roles);
         return new ValidatedUpload(request.documentId().strip(), title, department, classification, roles, filename,
-                content, request.effectiveAt() == null ? Instant.now() : request.effectiveAt());
+                content, request.effectiveAt() == null ? Instant.now() : request.effectiveAt(), request.seedManaged());
     }
 
     private static void validateDocumentId(IngestionRequest request) {

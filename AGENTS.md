@@ -25,11 +25,12 @@ Before declaring a coding task complete:
 
 ## Code Documentation
 
-- Add concise class-level and method-level Javadocs to public API endpoints and key service/domain classes when their purpose or contract is not obvious from their names and signatures.
+- For every implementation language in this repository, document key classes, functions, modules, and scripts when their purpose or contract is not obvious from their names and signatures. Use the language's idiomatic form, such as Javadocs, Python docstrings, TypeScript/JSDoc, or concise shell comments; do not force one language's convention onto another.
+- Add concise class-level and method-level Javadocs to public API endpoints and key Java service/domain classes when their purpose or contract is not obvious from their names and signatures.
 - Document behavior callers need to rely on: authorization scope, input constraints, meaningful return/status and error behavior, side effects, and lifecycle/failure semantics. For records and DTOs, explain fields whose meaning or nullability is not self-evident.
 - Make important architecture invariants explicit where they are enforced, such as server-controlled identity, SQL ACL filtering before fusion/model context, citation/source reauthorization, atomic version activation, and deterministic offline evaluation/abstention.
 - Keep comments accurate to the implementation and approved architecture; update or remove them when behavior changes. Do not promise guarantees that code and tests do not establish.
-- Avoid boilerplate that repeats a method name, annotations, or obvious statements. Prefer documenting why a contract matters and any non-obvious constraints; do not comment every getter, private helper, or straightforward line of code.
+- Avoid boilerplate that repeats a symbol name, annotations, or obvious statements. Prefer documenting why a contract matters and any non-obvious constraints; do not comment every getter, private helper, or straightforward line of code.
 
 ## Completion Review
 

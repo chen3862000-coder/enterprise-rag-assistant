@@ -72,17 +72,17 @@ public class DocumentManagementRepository {
     }
 
     public boolean disable(String documentId) {
-        return updates.update("UPDATE documents SET status = 'DISABLED', updated_at = now() "
+        return updates.update("UPDATE documents SET status = 'DISABLED', seed_repairable = false, updated_at = now() "
                 + "WHERE id = ? AND status = 'ACTIVE'", documentId) == 1;
     }
 
     public boolean delete(String documentId) {
-        return updates.update("UPDATE documents SET status = 'DELETED', updated_at = now() WHERE id = ? AND status <> 'DELETED'",
+        return updates.update("UPDATE documents SET status = 'DELETED', seed_repairable = false, updated_at = now() WHERE id = ? AND status <> 'DELETED'",
                 documentId) == 1;
     }
 
     public boolean restore(String documentId) {
-        return updates.update("UPDATE documents SET status = 'ACTIVE', updated_at = now() "
+        return updates.update("UPDATE documents SET status = 'ACTIVE', seed_repairable = false, updated_at = now() "
                 + "WHERE id = ? AND status IN ('DISABLED', 'DELETED')", documentId) == 1;
     }
 }

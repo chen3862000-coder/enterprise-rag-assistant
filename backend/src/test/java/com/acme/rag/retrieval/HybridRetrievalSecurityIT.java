@@ -303,6 +303,41 @@ class HybridRetrievalSecurityIT {
     }
 
     @Test
+    void syntheticSeederRepairsOnlyTransientFirstEmbeddingFailure() throws java.io.IOException {
+        String documentId = "doc-public-support-faq";
+        var fixture = Path.of("../synthetic-docs/public/support-faq.md");
+        byte[] fixtureBytes = Files.readAllBytes(fixture);
+        UUID failedVersion = UUID.randomUUID();
+        String hash;
+        try {
+            hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(fixtureBytes));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is required", exception);
+        }
+        jdbc.update("INSERT INTO documents (id,title,department,classification,status,seed_managed,seed_repairable) "
+                + "VALUES (?, 'Support FAQ', 'PUBLIC', 'PUBLIC', 'DISABLED', true, true)", documentId);
+        jdbc.update("INSERT INTO document_permissions (document_id,allowed_role) VALUES (?, 'PUBLIC')", documentId);
+        jdbc.update("INSERT INTO document_versions (id,document_id,version_number,content_hash,source_filename,effective_at,"
+                + "index_status,embedding_model_id,embedding_dimensions) VALUES (?, ?, 1, ?, 'support-faq.md', now(), "
+                + "'FAILED', 'nomic-embed-text', 768)", failedVersion, documentId, hash);
+        jdbc.update("INSERT INTO ingestion_jobs (id,document_id,document_version_id,status,error_message,completed_at) "
+                + "VALUES (?, ?, ?, 'FAILED', 'synthetic transient outage', now())", UUID.randomUUID(), documentId, failedVersion);
+
+        assertThat(jdbc.queryForObject("SELECT seed_repairable FROM documents WHERE id = ?", Boolean.class,
+                documentId)).isTrue();
+        var repair = new SyntheticSeedRunner(ingestion, true, Path.of("../synthetic-docs"));
+        repair.seedNow();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM documents WHERE id = ?", String.class, documentId))
+                .isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForObject("SELECT seed_repairable FROM documents WHERE id = ?", Boolean.class, documentId))
+                .isFalse();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM document_chunks c JOIN document_versions v "
+                + "ON v.id = c.document_version_id WHERE v.document_id = ? AND v.index_status = 'ACTIVE'",
+                Integer.class, documentId)).isGreaterThan(0);
+    }
+
+    @Test
     void concurrentFirstCreatesForSameLogicalDocumentSerializeAndAllocateVersions() throws Exception {
         String documentId = "doc-first-create-race";
         java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(2);

@@ -31,8 +31,22 @@ test('demo login, ACL-aware chat/source, upload/versioning, trace, and evaluatio
   await page.getByRole('button', { name: 'Upload & index' }).click()
   await expect(page.getByText(new RegExp(`Indexed version 1 for ${documentId}`))).toBeVisible({ timeout: 30_000 })
 
+  await page.getByRole('button', { name: 'Add document' }).click()
+  await page.getByLabel('Logical document ID').fill(documentId)
+  await page.getByLabel('Document title').fill(title)
+  await page.getByLabel('Department').selectOption('PUBLIC')
+  await page.getByLabel('Classification').selectOption('PUBLIC')
+  await page.getByLabel('Allowed roles').fill('PUBLIC')
+  await page.locator('input[name="file"]').setInputFiles({
+    name: 'policy-v2.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('# E2E Policy\nThe maintenance window starts at 03:00 UTC.'),
+  })
+  await page.getByRole('button', { name: 'Upload & index' }).click()
+  await expect(page.getByText(new RegExp(`Indexed version 2 for ${documentId}`))).toBeVisible({ timeout: 30_000 })
+
   await page.getByRole('button', { name: new RegExp(title) }).click()
-  await expect(page.locator('.version-expansion .version-tag').first()).toHaveText('v1')
+  await expect(page.locator('.version-expansion .version-tag').first()).toHaveText('v2')
 
   await page.getByRole('button', { name: 'Chat' }).click()
   await page.locator('textarea').fill('What is the public API base path?')
@@ -61,6 +75,8 @@ test('Alice cannot preview HR-only evidence', async ({ page }) => {
   await expect(page.locator('.message.assistant')).toBeVisible({ timeout: 15_000 })
   await expect(page.locator('.message.assistant')).toContainText(/INSUFFICIENT EVIDENCE/)
   await expect(page.getByText('HR Leave Policy')).toHaveCount(0)
+  const directSource = await page.request.get('/api/sources/doc-hr-leave-policy-v1-c0')
+  expect(directSource.status()).toBe(404)
 })
 
 test('upload validation uses structured client error text', async ({ page }) => {

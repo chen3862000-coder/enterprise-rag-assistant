@@ -11,4 +11,5 @@ record ValidatedUpload(
         Set<String> roles,
         String filename,
         byte[] content,
-        Instant effectiveAt) {}
+        Instant effectiveAt,
+        boolean seedManaged) {}

@@ -43,7 +43,7 @@ flowchart LR
   GEN --> DEEPSEEK[DeepSeek ChatModel]
 ```
 
-More detail is in [`docs/architecture.md`](docs/architecture.md), the [DDD system design](docs/ddd-system-design.md), [`docs/security-design.md`](docs/security-design.md), [`docs/retrieval-design.md`](docs/retrieval-design.md), and [`docs/evaluation-design.md`](docs/evaluation-design.md).
+More detail is in [`docs/architecture.md`](docs/architecture.md), the [DDD system design](docs/ddd-system-design.md), [`docs/security-design.md`](docs/security-design.md), [`docs/retrieval-design.md`](docs/retrieval-design.md), [`docs/evaluation-design.md`](docs/evaluation-design.md), and [`docs/local-cluster.md`](docs/local-cluster.md).
 
 ## Quick Start
 
@@ -64,6 +64,18 @@ docker compose -f compose.yaml -f compose.python.yaml up --build --wait
 ```
 
 Use the same Compose files with `down` to stop that selected project. Only one backend service is selected at a time; switching implementations requires a fresh demo login because each backend owns its own session cookie. Python-specific commands and limitations are documented in [`docs/python-backend.md`](docs/python-backend.md).
+
+### Local Cluster Control
+
+For a checked host-level workflow that builds, starts, waits for readiness, and stops the local Compose cluster:
+
+```bash
+./scripts/start-cluster.sh
+./scripts/start-cluster.sh --backend python
+./scripts/stop-cluster.sh
+```
+
+Use `--project` and `--port` to isolate a second stack, and `--volumes` on shutdown only when you intend to delete local PostgreSQL/Ollama data. The scripts preserve volumes by default, refuse backend changes within an existing project, and do not prune unrelated Docker resources. See [`docs/local-cluster.md`](docs/local-cluster.md) for prerequisites, switching backends, status/log commands, and troubleshooting.
 
 The app login is a demo identity selector, not password authentication. Compose defaults `CHAT_MODEL_PROVIDER=none`, so it starts without paid credentials; chat still runs retrieval and the evidence gate, but generated prose is disabled. Set `DEEPSEEK_API_KEY` and `CHAT_MODEL_PROVIDER=deepseek` in `.env` to enable generation. Offline evaluation and tests do not require the key.
 
@@ -89,6 +101,11 @@ The default seed path is `../synthetic-docs`; set `APP_SEED_ENABLED=true` and `A
 | `make test` | Run backend tests, Testcontainers, analysis, and coverage gates |
 | `make frontend-test` | Run React component tests |
 | `make eval` | Sign in as Carol and run the offline 63-scenario suite (requires `jq`) |
+| `./scripts/start-cluster.sh` | Build, start, and health-check the local Java cluster |
+| `./scripts/start-cluster.sh --backend python` | Start the Python cluster |
+| `./scripts/stop-cluster.sh` | Stop the selected project; preserve volumes |
+| `make cluster-start ARGS="--backend python"` | Start through the Make wrapper |
+| `make cluster-stop ARGS="--project NAME"` | Stop a specific project |
 
 Backend quality gate, on Java 21:
 
@@ -147,7 +164,7 @@ Traces store a query hash and bounded timing/count/provider/status fields, not r
 
 ## Verification Status
 
-Verification last run locally on 2026-10-28; these outcomes describe the checked worktree only, not a permanent guarantee. Java backend: `cd backend && ./mvnw verify` on Java 21 passed (66 unit tests, 40 Testcontainers PostgreSQL/pgvector integration tests, PMD, SpotBugs, ArchUnit, and JaCoCo thresholds); the integration tests applied Flyway migrations through V15. Python backend: `uv run ruff format --check app tests`, `uv run ruff check app tests`, `uv run mypy app`, `uv run pytest`, and `uv run pip-audit` passed (31 tests including real PostgreSQL/pgvector Testcontainers, 77.39% coverage, and no known dependency vulnerabilities). Frontend: `cd frontend && npm run build && npm test -- --run && npm audit --audit-level=moderate` passed (5 tests and zero audit findings). Browser workflows: `cd frontend && npm run test:e2e` passed all 3 Playwright workflows against the final Python backend, including citation/source preview, ACL denial, upload/versioning, trace, evaluation, and structured errors. The browser run reused cached Docker images because Docker Hub was temporarily unavailable for a fresh build. Compose configuration for both backends validated; a fresh registry-dependent cold start was not re-run in this final pass. The GitHub Actions `Verify` workflow runs the Java, frontend, browser, and Compose checks on pull requests and pushes to `main`.
+Verification last run locally on 2026-10-29; these outcomes describe the checked worktree only, not a permanent guarantee. Java backend: `cd backend && ./mvnw verify` on Java 21 passed (66 unit tests, 40 Testcontainers PostgreSQL/pgvector integration tests, PMD, SpotBugs, ArchUnit, and JaCoCo thresholds); the integration tests applied Flyway migrations through V15. Python backend: `uv run ruff format --check app tests`, `uv run ruff check app tests`, `uv run mypy app`, `uv run pytest`, and `uv run pip-audit` passed (31 tests including real PostgreSQL/pgvector Testcontainers, 77.39% coverage, and no known dependency vulnerabilities). Frontend: `cd frontend && npm run build && npm test -- --run && npm audit --audit-level=moderate` passed (5 tests and zero audit findings). Browser workflows: `cd frontend && npm run test:e2e` passed all 3 Playwright workflows against the final Python backend, including citation/source preview, ACL denial, upload/versioning, trace, evaluation, and structured errors. The browser run reused cached Docker images because Docker Hub was temporarily unavailable for a fresh build. Compose configuration for both backends validated; a fresh registry-dependent cold start was not re-run in this final pass. Cluster scripts: Bash syntax, help, backend-mismatch rejection, safe missing-project shutdown, and the Java start/health path passed; `shellcheck` was not installed. The GitHub Actions `Verify` workflow runs the Java, frontend, browser, and Compose checks on pull requests and pushes to `main`.
 
 Earlier Compose measurements are historical. Run the current suite with `make eval` and report its persisted results. It measures retrieval/evidence-gate behavior, not generated-answer quality.
 

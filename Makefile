@@ -1,10 +1,16 @@
-.PHONY: up down logs seed test eval frontend-test
+.PHONY: up down logs seed test eval frontend-test cluster-start cluster-stop
 
 up:
 	docker compose up --build -d
 
 down:
 	docker compose down
+
+cluster-start:
+	./scripts/start-cluster.sh $(ARGS)
+
+cluster-stop:
+	./scripts/stop-cluster.sh $(ARGS)
 
 logs:
 	docker compose logs -f --tail=200

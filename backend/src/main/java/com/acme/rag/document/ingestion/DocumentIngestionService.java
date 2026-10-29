@@ -81,11 +81,11 @@ public class DocumentIngestionService {
             metrics.ingestion(true);
             return result(upload.documentId(), reservation, chunks.size());
         } catch (IngestionException exception) {
-            versions.fail(upload.documentId(), reservation, exception);
+            versions.fail(upload.documentId(), reservation, exception, upload.seedManaged());
             metrics.ingestion(false);
             throw exception;
         } catch (IllegalArgumentException | DataAccessException exception) {
-            versions.fail(upload.documentId(), reservation, exception);
+            versions.fail(upload.documentId(), reservation, exception, upload.seedManaged());
             metrics.ingestion(false);
             throw new IngestionException(IngestionException.Kind.UNPROCESSABLE, safeFailureMessage(exception), exception);
         }
@@ -108,6 +108,10 @@ public class DocumentIngestionService {
 
     boolean isInactiveDocument(String documentId) {
         return versions.isInactiveDocument(documentId);
+    }
+
+    boolean isRetryableSeedDocument(String documentId) {
+        return versions.isRetryableSeedDocument(documentId);
     }
 
     private List<DocumentChunk> chunk(ValidatedUpload upload) {

@@ -17,15 +17,6 @@ frontend/playwright-report/
 frontend/tsconfig.tsbuildinfo
 python-backend/.venv/
 python-backend/.coverage
-python-backend/.pytest_cache/
-python-backend/.mypy_cache/
-python-backend/.ruff_cache/
-python-backend/**/__pycache__/
-cookies.txt
-evals/reports/*
-!evals/reports/.gitkeep
-python-backend/.venv/
-python-backend/.coverage
 python-backend/.coverage.*
 python-backend/.pytest_cache/
 python-backend/.mypy_cache/
@@ -34,3 +25,6 @@ python-backend/htmlcov/
 python-backend/**/__pycache__/
 python-backend/**/*.py[cod]
 python-backend/*.egg-info/
+cookies.txt
+evals/reports/*
+!evals/reports/.gitkeep

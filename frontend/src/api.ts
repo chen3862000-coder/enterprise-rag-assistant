@@ -6,6 +6,7 @@ import type {
   EvaluationSummary,
   Identity,
   IngestionResult,
+  IngestionStatus,
   SourcePreview,
 } from './types'
 
@@ -70,6 +71,13 @@ export const api = {
       ? `/api/documents/${encodeURIComponent(documentId)}/reindex`
       : '/api/documents'
     return request<IngestionResult>(path, { method: 'POST', headers: await csrfHeader(), body: form })
+  },
+  async ingestion(jobId: string) {
+    return request<IngestionStatus>(`/api/ingestions/${encodeURIComponent(jobId)}`)
+  },
+  async activeIngestion(documentId: string) {
+    const jobs = await request<IngestionStatus[]>(`/api/documents/${encodeURIComponent(documentId)}/ingestions`)
+    return jobs.find(job => job.status === 'INDEXING') ?? jobs[0] ?? null
   },
   async disable(documentId: string) {
     return request<void>(`/api/documents/${encodeURIComponent(documentId)}/disable`, {

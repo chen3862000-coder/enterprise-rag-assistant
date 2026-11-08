@@ -37,7 +37,12 @@ export type DocumentSummary = {
   status: 'ACTIVE' | 'DISABLED' | 'DELETED'
   currentVersion: number | null
   indexStatus: string | null
+  allowedRoles?: string[]
   updatedAt: string | null
+  ingestionJobId?: string | null
+  ingestionJobStatus?: 'INDEXING' | 'SUCCEEDED' | 'FAILED' | null
+  progressChunks?: number
+  totalChunks?: number | null
 }
 
 export type DocumentVersion = {
@@ -61,6 +66,21 @@ export type IngestionResult = {
   chunkCount: number
   duplicate: boolean
   metadataUpdated: boolean
+  queued?: boolean
+}
+
+export type IngestionStatus = {
+  jobId: string
+  documentId: string
+  documentTitle: string
+  status: 'INDEXING' | 'SUCCEEDED' | 'FAILED'
+  errorMessage: string | null
+  progressChunks: number
+  totalChunks: number | null
+  versionStatus: string
+  active: boolean
+  startedAt: string | null
+  completedAt: string | null
 }
 
 export type EvaluationMetrics = {

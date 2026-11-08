@@ -1,9 +1,16 @@
 """FastAPI application, route wiring, and lifespan hooks for the Python backend."""
 
+import asyncio
+import json
 import logging
+import os
 import re
+import shutil
+import tempfile
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from hashlib import sha256
+from pathlib import Path
 from time import monotonic
 from typing import Any, Literal, cast
 from uuid import UUID, uuid4
@@ -13,9 +20,17 @@ from fastapi.responses import Response
 from prometheus_client import Counter
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
+from starlette.concurrency import run_in_threadpool
 
+from app.chm import iter_chm_sections
 from app.database import database_ready, engine
-from app.documents import chunk_document, normalize_upload, parse_document
+from app.documents import (
+    Chunk,
+    iter_pdf_sections,
+    iter_section_chunks,
+    iter_text_chunks,
+    normalize_upload_metadata,
+)
 from app.errors import ApiError, install_error_handlers
 from app.evaluation import get_run, recent_runs
 from app.evaluation import run_evaluation as evaluate_offline
@@ -33,6 +48,12 @@ from app.providers import (
     PermanentProviderFailure,
     TransientProviderFailure,
     chat_provider,
+)
+from app.query_planner import (
+    DeterministicQueryPlanner,
+    PlannedQuery,
+    QueryPlanningService,
+    normalize_query,
 )
 from app.retrieval import HybridRetriever
 from app.security import csrf_token, current_identity, login, logout, require_csrf, set_session_cookie
@@ -63,7 +84,19 @@ async def lifespan(_app: FastAPI) -> Any:
         )
     if get_settings().seed_synthetic_docs:
         seed_corpus(storage, embeddings)
-    yield
+    storage.recover_stale_ingestions()
+    worker_task = (
+        asyncio.create_task(_ingestion_worker()) if get_settings().ingestion_worker_enabled else None
+    )
+    try:
+        yield
+    finally:
+        if worker_task:
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title="Enterprise RAG Assistant Python Backend", lifespan=lifespan)
@@ -186,28 +219,78 @@ def auth_logout(request: Request, response: Response) -> Response:
 
 
 @app.post("/api/chat")
-def chat(request: Request, body: ChatBody) -> dict[str, object]:
+async def chat(request: Request, body: ChatBody) -> dict[str, object]:
     """Run secure retrieval, evidence gating, generation, and citation reauthorization."""
 
     identity = current_identity(request)
     require_csrf(request)
     started = monotonic()
     trace_id = uuid4()
+    planned: PlannedQuery | None = None
     retrieval_ms = generation_ms = 0
     result = None
     context_entries: list[dict[str, Any]] = []
     provider: DisabledChatProvider | DeepSeekChatProvider = DisabledChatProvider()
     try:
         provider = chat_provider()
+        planning_started = monotonic()
+        normalized_query = normalize_query(body.message)
+        try:
+            planned = await QueryPlanningService().plan(body.message, normalized_query)
+        except Exception as planner_error:
+            fallback_plan = await _deterministic_plan(body.message, normalized_query)
+            planned = PlannedQuery(
+                fallback_plan.original,
+                fallback_plan.normalized,
+                fallback_plan.plan,
+                fallback_plan.provider,
+                fallback_plan.model,
+                fallback_plan.latency_ms,
+                fallback_plan.status,
+                "TIMEOUT" if "timeout" in str(planner_error).lower() else "PROVIDER_ERROR",
+                fallback_plan.generated_query_count,
+                fallback_plan.deduplicated_query_count,
+            )
+            LOGGER.warning(
+                "query planner fallback provider=unknown reason=%s",
+                "TIMEOUT" if "timeout" in str(planner_error).lower() else "PROVIDER_ERROR",
+            )
+        planning_ms = int((monotonic() - planning_started) * 1000)
         retrieval_started = monotonic()
-        result = retriever.retrieve(body.message, identity.roles)
+        result = await run_in_threadpool(
+            retriever.retrieve,
+            body.message,
+            identity.roles,
+            plan=planned.plan,
+            gate_query=planned.gate_query,
+            planned_queries=planned.channel_queries(),
+        )
         retrieval_ms = int((monotonic() - retrieval_started) * 1000)
+        LOGGER.info(
+            "query planning status=%s provider=%s model=%s latency_ms=%d intent=%s query_count=%d deduplicated_query_count=%d vector_count=%d keyword_count=%d exact_count=%d fused_count=%d fallback_reason=%s",
+            planned.status,
+            planned.provider,
+            planned.model,
+            planning_ms,
+            planned.plan.intent.value,
+            planned.generated_query_count,
+            planned.deduplicated_query_count,
+            result.vector_count,
+            result.keyword_count,
+            result.exact_count,
+            len(result.candidates),
+            planned.fallback_reason or "NONE",
+        )
         if not result.sufficient:
             answer = "I could not find sufficiently relevant authorized evidence to answer that question."
             citations: list[dict[str, Any]] = []
             grounding = "INSUFFICIENT_EVIDENCE"
         else:
             prompt_context, context_entries = build_context(result.candidates)
+            styled_context = (
+                f"Requested answer intent: {planned.plan.intent.value}. "
+                "Answer only from the supplied authorized evidence.\n\n" + prompt_context
+            )
             if not provider.enabled:
                 citations = reauthorize(storage, context_entries, identity.roles)
                 if len(citations) != len(context_entries):
@@ -224,7 +307,12 @@ def chat(request: Request, body: ChatBody) -> dict[str, object]:
             else:
                 generation_started = monotonic()
                 try:
-                    generated = answer_with_provider(provider, body.message, prompt_context)
+                    generated = await run_in_threadpool(
+                        answer_with_provider,
+                        provider,
+                        _style_query(planned),
+                        styled_context,
+                    )
                 finally:
                     generation_ms = int((monotonic() - generation_started) * 1000)
                 answer, cited, _invalid = validate_citations(generated, context_entries)
@@ -243,6 +331,7 @@ def chat(request: Request, body: ChatBody) -> dict[str, object]:
             "citations": public,
             "traceId": str(trace_id),
             "groundingStatus": grounding,
+            "queryIntent": planned.plan.intent.value,
         }
         _persist_chat_trace(
             trace_id,
@@ -258,11 +347,33 @@ def chat(request: Request, body: ChatBody) -> dict[str, object]:
             "SUCCEEDED",
             None,
             provider,
+            planned,
+            result.query_diagnostics if result else None,
         )
         return response
     except ValueError as error:
+        if planned is None:
+            planned = await _deterministic_plan(body.message, normalize_query(body.message))
+            _persist_chat_trace(
+                trace_id,
+                identity.username,
+                body.message,
+                retrieval_ms,
+                generation_ms,
+                int((monotonic() - started) * 1000),
+                result,
+                len(context_entries),
+                0,
+                "REQUEST_FAILED",
+                "FAILED",
+                "INVALID_REQUEST",
+                provider,
+                planned,
+            )
         raise ApiError(400, "INVALID_REQUEST", "The chat request is invalid") from error
     except PermanentProviderFailure as error:
+        if planned is None:
+            planned = await _deterministic_plan(body.message, normalize_query(body.message))
         _persist_chat_trace(
             trace_id,
             identity.username,
@@ -277,11 +388,16 @@ def chat(request: Request, body: ChatBody) -> dict[str, object]:
             "FAILED",
             "PROVIDER_REQUEST_REJECTED",
             provider,
+            planned,
+            result.query_diagnostics if result else None,
         )
         raise ApiError(
             502, "CHAT_PROVIDER_REJECTED", "The answer provider could not process the request"
         ) from error
     except Exception as error:
+        LOGGER.exception("chat request failed trace_id=%s", trace_id)
+        if planned is None:
+            planned = await _deterministic_plan(body.message, normalize_query(body.message))
         _persist_chat_trace(
             trace_id,
             identity.username,
@@ -298,6 +414,8 @@ def chat(request: Request, body: ChatBody) -> dict[str, object]:
             if isinstance(error, TransientProviderFailure)
             else "INTERNAL_REQUEST_ERROR",
             provider,
+            planned,
+            result.query_diagnostics if result else None,
         )
         if isinstance(error, TransientProviderFailure):
             code, status, message = (
@@ -309,6 +427,8 @@ def chat(request: Request, body: ChatBody) -> dict[str, object]:
             raise error
         else:
             code, status, message = "CHAT_FAILED", 500, "The chat request could not be completed"
+        if planned is None:
+            planned = await _deterministic_plan(body.message, normalize_query(body.message))
         raise ApiError(status, code, message) from error
 
 
@@ -326,6 +446,8 @@ def _persist_chat_trace(
     status: str,
     error: str | None,
     provider: Any,
+    planned: PlannedQuery | None = None,
+    retrieval_diagnostics: dict[str, Any] | None = None,
 ) -> None:
     """Persist hashed query and bounded operational fields best-effort."""
 
@@ -353,8 +475,54 @@ def _persist_chat_trace(
                 "mode": "GENERATED" if provider.enabled else "RETRIEVAL_ONLY",
             }
         )
+        if planned:
+            storage.update_query_planner_diagnostics(
+                trace_id,
+                {
+                    "provider": planned.provider,
+                    "model": planned.model,
+                    "latency": planned.latency_ms,
+                    "status": planned.status,
+                    "fallback": planned.fallback_reason,
+                    "intent": planned.plan.intent.value,
+                    "generated": planned.generated_query_count,
+                    "deduplicated": planned.deduplicated_query_count,
+                    "channels": json.dumps(
+                        retrieval_diagnostics.get("channels", {}) if retrieval_diagnostics else {}
+                    ),
+                    "candidates": len(result.candidates) if result else 0,
+                    "retrieval_counts": json.dumps(retrieval_diagnostics or {}),
+                },
+            )
     except Exception:
         LOGGER.warning("Unable to persist RAG trace %s", trace_id)
+
+
+def _style_query(planned: PlannedQuery | None) -> str:
+    """Give generation the original request and validated intent; retrieval stays evidence-led."""
+
+    if planned is None:
+        return ""
+    return f"Original user request: {planned.original}\nRequested answer intent: {planned.plan.intent.value}."
+
+
+async def _deterministic_plan(original: str, normalized: str) -> PlannedQuery:
+    """Use a no-network fallback when the configured planner cannot serve this request."""
+
+    plan = await DeterministicQueryPlanner().plan(original, normalized)
+    variants = [plan.subject, plan.semantic_query, *plan.lexical_queries, *plan.alternative_queries]
+    return PlannedQuery(
+        original,
+        normalized,
+        plan,
+        "deterministic",
+        "query-normalizer-v1",
+        0,
+        "FALLBACK",
+        None,
+        len(variants),
+        len(set(value.casefold() for value in variants)),
+    )
 
 
 @app.get("/api/sources/{chunk_id}")
@@ -378,6 +546,174 @@ def documents(request: Request) -> list[dict[str, object]]:
 
     identity = current_identity(request)
     return storage.list_documents(identity.roles, identity.document_admin)
+
+
+@app.get("/api/ingestions/{job_id}")
+def ingestion_status(request: Request, job_id: UUID) -> dict[str, object]:
+    """Return authorized ingestion state and durable chunk-count progress for frontend polling."""
+
+    identity = current_identity(request)
+    result = storage.ingestion_job(job_id, identity.roles, identity.document_admin)
+    if result is None:
+        raise ApiError(404, "NOT_FOUND", "Ingestion job was not found")
+    return _ingestion_status_payload(result)
+
+
+@app.get("/api/documents/{document_id}/ingestions")
+def document_ingestions(request: Request, document_id: str) -> list[dict[str, object]]:
+    """List authorized job history for selected-document progress and recovery UI."""
+
+    identity = current_identity(request)
+    jobs = storage.ingestion_jobs_for_document(document_id, identity.roles, identity.document_admin)
+    return [_ingestion_status_payload(job) for job in jobs]
+
+
+def _ingestion_status_payload(result: dict[str, Any]) -> dict[str, object]:
+    """Map internal job records to a stable, content-free polling response."""
+
+    started = result.get("started_at")
+    completed = result.get("completed_at")
+    return {
+        "jobId": str(result["id"]),
+        "documentId": result["document_id"],
+        "documentTitle": result["title"],
+        "status": result["status"],
+        "errorMessage": result["error_message"],
+        "progressChunks": result["progress_chunks"],
+        "totalChunks": result["progress_total_chunks"],
+        "versionStatus": result["index_status"],
+        "active": str(result["current_version_id"]) == str(result["document_version_id"]),
+        "startedAt": started.isoformat() if started else None,
+        "completedAt": completed.isoformat() if completed else None,
+    }
+
+
+def _process_ingestion_job(job: dict[str, Any]) -> int:
+    """Resume a durable source job after its committed chunk checkpoint."""
+
+    source_path = Path(job["source_path"])
+    if not source_path.is_file():
+        storage.fail_claimed_ingestion(job, "Durable ingestion source is missing")
+        raise ApiError(422, "INGESTION_UNPROCESSABLE", "Durable ingestion source is missing")
+    suffix = str(job["source_filename"]).lower().rsplit(".", maxsplit=1)[-1]
+
+    extraction_root = Path(tempfile.mkdtemp(prefix="rag-worker-"))
+
+    def process(resume_chunks: int) -> Iterator[tuple[list[Chunk], list[list[float]]]]:
+        if suffix == "pdf":
+            chunk_stream = iter_section_chunks(iter_pdf_sections(source_path))
+        elif suffix == "chm":
+            chunk_stream = iter_section_chunks(iter_chm_sections(source_path, extraction_root / "chm"))
+        else:
+            chunk_stream = iter_text_chunks(source_path)
+        chunks = chunk_stream
+        batch: list[Chunk] = []
+        batch_number = 0
+        total_chunks = 0
+        for chunk in chunks:
+            total_chunks = max(total_chunks, chunk.index + 1)
+            if chunk.index < resume_chunks:
+                continue
+            batch.append(chunk)
+            if len(batch) < get_settings().ingestion_batch_size:
+                continue
+            batch_number += 1
+            batch_started = monotonic()
+            LOGGER.info(
+                "ingestion embedding batch started job_id=%s batch=%d chunks=%d resume_at=%d",
+                job["id"],
+                batch_number,
+                len(batch),
+                resume_chunks,
+            )
+            vectors = embeddings.embed([item.text for item in batch])
+            LOGGER.info(
+                "ingestion embedding batch completed job_id=%s batch=%d chunks=%d elapsed_seconds=%.2f",
+                job["id"],
+                batch_number,
+                len(batch),
+                monotonic() - batch_started,
+            )
+            yield batch, vectors
+            batch = []
+        if batch:
+            batch_number += 1
+            batch_started = monotonic()
+            LOGGER.info(
+                "ingestion embedding batch started job_id=%s batch=%d chunks=%d final=true resume_at=%d",
+                job["id"],
+                batch_number,
+                len(batch),
+                resume_chunks,
+            )
+            vectors = embeddings.embed([item.text for item in batch])
+            LOGGER.info(
+                "ingestion embedding batch completed job_id=%s batch=%d chunks=%d elapsed_seconds=%.2f",
+                job["id"],
+                batch_number,
+                len(batch),
+                monotonic() - batch_started,
+            )
+            yield batch, vectors
+        storage.update_total_chunks(job, total_chunks)
+
+    try:
+        count = storage.run_claimed_ingestion(job, process)
+        source_path.unlink(missing_ok=True)
+        LOGGER.info(
+            "ingestion worker completed job_id=%s document_id=%s chunks=%d",
+            job["id"],
+            job["document_id"],
+            count,
+        )
+        return count
+    except TransientProviderFailure:
+        job_state = storage.ingestion_job_state(job["id"])
+        if job_state == "FAILED":
+            source_path.unlink(missing_ok=True)
+        else:
+            LOGGER.warning(
+                "ingestion worker deferred job_id=%s document_id=%s", job["id"], job["document_id"]
+            )
+        raise
+    except Exception:
+        job_state = storage.ingestion_job_state(job["id"])
+        if job_state != "INDEXING":
+            source_path.unlink(missing_ok=True)
+        LOGGER.exception("ingestion worker failed job_id=%s document_id=%s", job["id"], job["document_id"])
+        raise
+    finally:
+        shutil.rmtree(extraction_root, ignore_errors=True)
+
+
+async def _ingestion_worker() -> None:
+    """Poll PostgreSQL and process durable embedding jobs sequentially in one worker loop."""
+
+    worker_id = f"{os.getpid()}-{uuid4()}"
+    lease = await run_in_threadpool(storage.acquire_ingestion_worker_lock)
+    if lease is None:
+        LOGGER.warning("ingestion worker not started; another backend instance owns the worker lease")
+        return
+    LOGGER.info("ingestion worker started worker_id=%s", worker_id)
+    try:
+        released = await run_in_threadpool(storage.requeue_interrupted_ingestions)
+        if released:
+            LOGGER.warning("interrupted ingestion jobs requeued count=%d", released)
+        while True:
+            job = await run_in_threadpool(storage.claim_ingestion_job, worker_id)
+            if job is None:
+                await asyncio.sleep(get_settings().ingestion_worker_poll_seconds)
+                continue
+            try:
+                await run_in_threadpool(_process_ingestion_job, job)
+            except TransientProviderFailure:
+                continue
+            except Exception:
+                state = await run_in_threadpool(storage.ingestion_job_state, job["id"])
+                if state == "FAILED" and job.get("source_path"):
+                    Path(job["source_path"]).unlink(missing_ok=True)
+    finally:
+        await run_in_threadpool(storage.release_ingestion_worker_lock, lease)
 
 
 @app.get("/api/documents/{document_id}/versions")
@@ -404,7 +740,7 @@ def require_admin(request: Request) -> None:
         raise ApiError(403, "FORBIDDEN", "Access is denied")
 
 
-@app.post("/api/documents", status_code=200)
+@app.post("/api/documents", status_code=202)
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
@@ -414,12 +750,12 @@ async def upload_document(
     classification: str = Form(...),
     allowed_roles: str = Form(..., alias="allowedRoles"),
 ) -> dict[str, object]:
-    """Validate, parse, embed, and atomically activate a new document version."""
+    """Validate and durably queue an upload for background ingestion."""
 
     return await _index_upload(request, file, "", title, department, classification, allowed_roles)
 
 
-@app.post("/api/documents/{path_document_id}/reindex", status_code=200)
+@app.post("/api/documents/{path_document_id}/reindex", status_code=202)
 async def reindex_document(
     request: Request,
     path_document_id: str,
@@ -455,25 +791,108 @@ async def _index_upload(
     form = await request.form()
     form_document_id = form.get("documentId")
     document_id = path_or_form_document_id or str(form_document_id or "")
-    payload = file.file.read(get_settings().maximum_upload_bytes + 1)
-    data = normalize_upload(
-        document_id, title, department, classification, allowed_roles, file.filename or "", payload
-    )
-
-    def process() -> tuple[list[Any], list[list[float]]]:
-        chunks = chunk_document(parse_document(data["filename"], data["content"]))
-        return chunks, embeddings.embed([chunk.text for chunk in chunks])
-
+    upload_started = monotonic()
+    durable_source: Path | None = None
     try:
-        return storage.ingest(data, process)
+        source_root = Path(get_settings().ingestion_source_dir)
+        source_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        incoming_path = source_root / f"{uuid4()}.upload"
+        digest = sha256()
+        size = 0
+        with incoming_path.open("wb") as destination:
+            while block := await file.read(1024 * 1024):
+                size += len(block)
+                if size > get_settings().maximum_upload_bytes:
+                    raise ApiError(
+                        413, "INGESTION_INVALID_INPUT", "File exceeds the configured upload size limit"
+                    )
+                digest.update(block)
+                destination.write(block)
+        incoming_path.chmod(0o600)
+        durable_source = incoming_path
+        if not size:
+            raise ApiError(400, "INGESTION_INVALID_INPUT", "File is empty")
+        filename = file.filename or ""
+        data = normalize_upload_metadata(
+            document_id,
+            title,
+            department,
+            classification,
+            allowed_roles,
+            filename,
+            digest.hexdigest(),
+        )
+        suffix = data["filename"].lower().rsplit(".", maxsplit=1)[-1]
+        LOGGER.info("ingestion upload received document_id=%s format=%s bytes=%d", document_id, suffix, size)
+        with incoming_path.open("rb") as binary_source:
+            prefix = binary_source.read(1024)
+        is_pdf = b"%PDF-" in prefix
+        is_chm = prefix.startswith(b"ITSF")
+        if (suffix == "pdf") != is_pdf or (suffix == "chm") != is_chm:
+            raise ApiError(
+                400, "INGESTION_INVALID_INPUT", "Uploaded file content does not match its filename extension"
+            )
+        if suffix in {"txt", "md", "markdown"}:
+            try:
+                with incoming_path.open("r", encoding="utf-8", errors="strict") as text_source:
+                    while text_block := text_source.read(64 * 1024):
+                        if any(ord(char) < 32 and char not in "\n\r\t" for char in text_block):
+                            raise ApiError(
+                                400,
+                                "INGESTION_INVALID_INPUT",
+                                "Text upload contains binary control characters",
+                            )
+            except UnicodeDecodeError as error:
+                raise ApiError(400, "INGESTION_INVALID_INPUT", "Text upload must be valid UTF-8") from error
+        data["source_path"] = str(incoming_path)
+        data["source_size_bytes"] = size
+        result = await run_in_threadpool(storage.enqueue_ingestion, data)
+        if result.get("queued"):
+            if data["source_path"] != str(incoming_path):
+                incoming_path.unlink(missing_ok=True)
+                durable_source = None
+            durable_source = None
+            LOGGER.info(
+                "ingestion request queued document_id=%s job_id=%s version=%s elapsed_seconds=%.2f",
+                document_id,
+                result["jobId"],
+                result["version"],
+                monotonic() - upload_started,
+            )
+            return result
+        if durable_source:
+            durable_source.unlink(missing_ok=True)
+            durable_source = None
+        LOGGER.info(
+            "ingestion request completed as duplicate document_id=%s elapsed_seconds=%.2f",
+            document_id,
+            monotonic() - upload_started,
+        )
+        return result
     except ApiError:
         raise
     except TransientProviderFailure as error:
+        LOGGER.warning(
+            "ingestion provider unavailable document_id=%s elapsed_seconds=%.2f error_type=%s",
+            document_id,
+            monotonic() - upload_started,
+            type(error).__name__,
+        )
         raise ApiError(
             503, "INGESTION_PROVIDER_UNAVAILABLE", "Embedding provider is temporarily unavailable"
         ) from error
     except Exception as error:
+        LOGGER.exception(
+            "ingestion request failed document_id=%s elapsed_seconds=%.2f error_type=%s",
+            document_id,
+            monotonic() - upload_started,
+            type(error).__name__,
+        )
         raise ApiError(422, "INGESTION_UNPROCESSABLE", "Document indexing failed") from error
+    finally:
+        if durable_source:
+            durable_source.unlink(missing_ok=True)
+        await file.close()
 
 
 @app.post("/api/documents/{document_id}/disable", status_code=204)

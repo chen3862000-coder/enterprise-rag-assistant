@@ -62,7 +62,7 @@ class OllamaEmbeddingProvider:
             response = httpx.post(
                 f"{self.base_url}/api/embed",
                 json={"model": self.model, "input": texts},
-                timeout=httpx.Timeout(connect=3.0, read=45.0, write=10.0, pool=3.0),
+                timeout=httpx.Timeout(connect=3.0, read=180.0, write=30.0, pool=3.0),
             )
         except httpx.TransportError as error:
             raise TransientProviderFailure("Embedding provider unavailable") from error

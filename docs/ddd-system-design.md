@@ -171,7 +171,7 @@ sequenceDiagram
 
 The implemented workflow in `DocumentIngestionService` validates input, reserves or reuses a version, parses and chunks non-duplicate content, embeds it, then calls `DocumentVersionRepository.activate`. The repository obtains an advisory transaction lock keyed by logical document ID when reserving, and locks the document row while activating. Activation persists chunks, supersedes the former active version, activates the new version, updates the current-version pointer and document metadata/ACL, and marks the job successful in one transaction. A failure marks the pending version/job failed; the prior current version remains active. Identical current content avoids embedding/version creation while metadata and ACL changes are applied transactionally. Inactive documents require explicit restoration.
 
-This is a synchronous request workflow with persisted job status, not asynchronous distributed ingestion. The current supported formats are Markdown, plain text, and PDFs with extractable text. OCR is out of scope. The vector dimension is fixed at 768 by schema and configuration.
+This is a synchronous request workflow with persisted job status, not asynchronous distributed ingestion. The Java backend supports Markdown, plain text, and PDFs with extractable text. The alternate Python backend additionally supports bounded CHM HTML extraction; see `python-backend.md` for limits and extractor requirements. OCR is out of scope. The vector dimension is fixed at 768 by schema and configuration.
 
 ### Chat, Retrieval, and Citation Resolution
 

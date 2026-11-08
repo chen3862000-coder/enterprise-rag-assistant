@@ -15,7 +15,7 @@ Java remains the default implementation and source compatibility baseline. Pytho
 | ACL retrieval | SQL role/status/current-version/active-index constraints before fusion | Separate SQL vector/FTS/exact queries include these predicates; PostgreSQL integration test verifies each method returns no HR-only row to Engineering |
 | Ingestion | Stable IDs, staged indexing, atomic activation, old version survives failure, duplicate content avoids embed | PostgreSQL integration tests cover activation, failure preservation, duplicate metadata/ACL update, source reauthorization, disable/restore, seed repair |
 | Evidence and generation | Deterministic rejection, no citations on insufficient evidence, retrieval-only labeled distinctly | Unit/API tests cover core policy and no-provider path; full scenario parity against Java still requires controlled corpus comparison |
-| Evaluation | Existing 63 dev labels/diagnostics and release thresholds; held-out data reported separately | 63 development plus 14 held-out cases; prefix shadow marked unavailable, not approximated |
+| Evaluation | Existing 63 dev labels/diagnostics and release thresholds; held-out data reported separately | 63 development plus 40 held-out cases; prefix shadow marked unavailable, not approximated |
 | Traces | Hashed query, bounded operational fields, owner/admin access | Uses shared `rag_traces`; trace retrieval shape and source data exclusion implemented |
 
 ## Flyway and Shared Database
@@ -26,7 +26,7 @@ Java was verified to migrate an empty Testcontainers pgvector database through V
 
 ## Evaluation Methodology
 
-Development data: `evals/dataset.jsonl`, Java version `2026-10-p1-v5`, 63 labeled synthetic cases. Held-out data: `python-backend/evals/heldout-paraphrases.jsonl`, 14 separately frozen paraphrases. IDs are disjoint and the held-out file was created separately from the rule port. Results must always report development and held-out metrics independently. The stored compatibility summary currently uses a combined dataset version and combined counts; the independent metric groups are retained in run configuration.
+Development data: `evals/dataset.jsonl`, Java version `2026-10-p1-v5`, 63 labeled synthetic cases. Held-out data: `python-backend/evals/heldout-paraphrases.jsonl`, 40 separately versioned synthetic scenarios. IDs are disjoint and the held-out file is stored separately from development data. Results must always report development and held-out metrics independently. The stored compatibility summary currently uses a combined dataset version and combined counts; the independent metric groups are retained in run configuration.
 
 Release checks require zero ACL leakage, 100% freshness, 100% citation-ID validity, false-abstention at most 20%, and false-admission at most 5%, plus the Java minimum positive/negative case counts for release quality. Prefix-shadow shadow evaluation is unavailable in Python and appears as `available: false`; it must not be interpreted as a zero-score experiment.
 

@@ -70,6 +70,29 @@ class QueryPlanningServiceTest {
     }
 
     @Test
+    void plannerPromptSeparatesProcedureSubjectFromRequestedActionWithoutChangingIdentifiers() {
+        String plan = """
+                {"intent":"PROCEDURE","subject":"CSD sequence function","constraints":["usage"],
+                "lexical_queries":["CSD","sequence function"],
+                "semantic_query":"CSD sequence function usage",
+                "alternative_queries":["CSD sequence function API"],"language":"zh"}
+                """;
+        java.util.List<String> prompts = new java.util.ArrayList<>();
+        QueryPlannerClient client = (model, key, timeout, system, request) -> {
+            prompts.add(system);
+            return plan;
+        };
+
+        var result = service(client, true, 1500).plan("解释下csd序列函数怎么用");
+
+        assertThat(result.plan().intent()).isEqualTo(QueryIntent.PROCEDURE);
+        assertThat(result.plan().lexicalQueries()).contains("CSD", "sequence function");
+        assertThat(prompts.getFirst()).contains("Separate the stable subject/function name")
+                .contains("without dropping that language constraint")
+                .contains("do not silently correct a spelling variant");
+    }
+
+    @Test
     void rejectsUnknownSecurityFieldsAndFallsBackWithoutUsingPlan() {
         String invalidPlan = """
                 {"intent":"LOOKUP","subject":"public","constraints":[],"lexical_queries":[],

@@ -4,10 +4,17 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class RetrievalIntentPolicy {
-    private static final Pattern TECHNICAL_ID = Pattern.compile("(?U)(?=[\\p{Alnum}_./:-]*[0-9])[\\p{Alnum}_./:-]{2,}");
+    private static final Pattern TECHNICAL_ID = Pattern.compile("(?=[A-Za-z0-9_./:-]*[0-9])[A-Za-z0-9_./:-]{2,}");
+    private static final Pattern ASCII_TECHNICAL_TOKEN = Pattern.compile("(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9_]{2,}(?![A-Za-z0-9_])");
+    private static final Pattern API_SYMBOL = Pattern.compile("\\b[A-Z][A-Z0-9_]{5,}\\b");
+    private static final Pattern HEADER_IDENTIFIER = Pattern.compile("\\bX-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NAMED_CODE = Pattern.compile(
+            "(?i)\\b(?:error|status|code|identifier|header)\\b|错误|状态|代码|标识|编号|头部|请求头");
+    private static final Pattern CJK_RUN = Pattern.compile("[\\u3040-\\u30ff\\u3400-\\u9fff\\uac00-\\ud7af]+");
     private static final Pattern TECHNICAL_COMPARISON = Pattern.compile("(?i)\\b(?:compare|versus|vs|difference|between)\\b");
     private static final Pattern NUMBERED_HTTP_STATUS = Pattern.compile("(?i)\\b(?:http|status|error|code)\\s*[-:]?\\s*[0-9]{3}\\b");
     private static final Pattern FUTURE_SPECULATION = Pattern.compile(
@@ -19,6 +26,9 @@ final class RetrievalIntentPolicy {
     private static final Pattern SENSITIVE_VALUE_REQUEST = Pattern.compile(
             "(?i)\\b(?:what|which|show|reveal|provide|tell me|give me|state|list|identify)\\b.{0,120}\\b(?:password|credential|secret|private key|token|salary|acquisition price|home address)\\b|"
                     + "\\b(?:password|credential|secret|private key|token|salary|acquisition price|home address)\\b.{0,80}\\b(?:value|content|it is|was|exposed|used)\\b");
+    private static final Pattern SENSITIVE_VALUE_TERM = Pattern.compile(
+            "(?i)\\b(?:password|credential|secret|private key|token|salary|acquisition price|home address)\\b|"
+                    + "密码|口令|凭证|密钥|令牌|工资|薪资|住址|家庭住址");
     private static final Pattern POLICY_GUIDANCE = Pattern.compile(
             "(?i)^\\s*(?:what|which)\\s+(?:is|are)\\s+(?:the\\s+)?(?:policy|policies|standard|standards|guidance|requirements?)\\b"
                     + ".{0,100}\\b(?:storing|handling|rotation|rotating|protecting|managing)\\b"
@@ -48,7 +58,8 @@ final class RetrievalIntentPolicy {
         if (!TECHNICAL_ID.matcher(query).find()) {
             return missingScope(query, roles);
         }
-        if (exactMatches.isEmpty() && hasExactlyOneTechnicalIdentifier(query) && queryTerms(query).size() <= 4) {
+        if (exactMatches.isEmpty() && hasExactlyOneTechnicalIdentifier(query) && queryTerms(query).size() <= 4
+                && !NAMED_CODE.matcher(query).find()) {
             return "UNMATCHED_TECHNICAL_IDENTIFIER";
         }
         return missingScope(query, roles);
@@ -58,28 +69,61 @@ final class RetrievalIntentPolicy {
         if (containsSensitiveTerm(query)) {
             return List.of();
         }
-        Set<String> identifiers = new HashSet<>();
-        var matcher = TECHNICAL_ID.matcher(query);
-        while (matcher.find()) {
-            String identifier = matcher.group().replaceFirst("\\.+$", "");
-            if (identifier.isEmpty()) {
-                continue;
-            }
-            boolean hasLetter = identifier.codePoints().anyMatch(Character::isLetter);
-            if (hasLetter || isNamedNumericCode(query, identifier)) {
-                identifiers.add(identifier.toLowerCase(Locale.ROOT));
-            }
-        }
-        if (identifiers.size() != 1) {
+        String normalized = java.text.Normalizer.normalize(query, java.text.Normalizer.Form.NFKC);
+        Set<String> identifiers = queryIdentifiers(query, normalized);
+        if (identifiers.isEmpty()) {
             return List.of();
         }
+        Set<String> indexedMatches = indexedMatches(chunks, identifiers);
+        if (indexedMatches.size() != 1) {
+            return List.of();
+        }
+        return exactChunks(chunks, indexedMatches.iterator().next());
+    }
+
+    private static Set<String> queryIdentifiers(String query, String normalized) {
+        Set<String> identifiers = new HashSet<>();
+        Matcher matcher = TECHNICAL_ID.matcher(normalized);
+        while (matcher.find()) {
+            addAllowedIdentifier(query, identifiers, matcher.group());
+        }
+        if (CJK_RUN.matcher(normalized).find()) {
+            Matcher ascii = ASCII_TECHNICAL_TOKEN.matcher(CJK_RUN.matcher(normalized).replaceAll(" "));
+            while (ascii.find()) {
+                String token = ascii.group();
+                if (token.matches("[A-Z][A-Z0-9_]{2,}")
+                        || token.matches("(?i)X-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+") || token.matches(".*[0-9].*")) {
+                    addAllowedIdentifier(query, identifiers, token);
+                }
+            }
+        }
+        addPatternMatches(API_SYMBOL, normalized, identifiers);
+        addPatternMatches(HEADER_IDENTIFIER, normalized, identifiers);
+        return identifiers;
+    }
+
+    private static void addPatternMatches(Pattern pattern, String query, Set<String> identifiers) {
+        Matcher matcher = pattern.matcher(query);
+        while (matcher.find()) {
+            identifiers.add(matcher.group().toLowerCase(Locale.ROOT));
+        }
+    }
+
+    private static Set<String> indexedMatches(List<RankedChunk> chunks, Set<String> identifiers) {
         return chunks.stream().filter(RankedChunk::exactMatch)
-                .filter(chunk -> identifiers.stream().anyMatch(identifier -> containsExactIdentifier(chunk.text(), identifier)))
-                .toList();
+                .map(chunk -> chunk.text().toLowerCase(Locale.ROOT))
+                .flatMap(text -> identifiers.stream().filter(identifier -> containsExactIdentifier(text, identifier)))
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private static List<RankedChunk> exactChunks(List<RankedChunk> chunks, String identifier) {
+        return chunks.stream().filter(RankedChunk::exactMatch)
+                .filter(chunk -> containsExactIdentifier(chunk.text(), identifier)).toList();
     }
 
     static boolean containsSensitiveTerm(String query) {
-        return SENSITIVE_VALUE_REQUEST.matcher(query).find() && !POLICY_GUIDANCE.matcher(query).find();
+        return (SENSITIVE_VALUE_REQUEST.matcher(query).find() || SENSITIVE_VALUE_TERM.matcher(query).find())
+                && !POLICY_GUIDANCE.matcher(query).find();
     }
 
     private static String unsupportedRequest(String query) {
@@ -171,6 +215,17 @@ final class RetrievalIntentPolicy {
                 + "(?:\\.+(?=$|[^\\p{Alnum}_/:.-]))?(?![\\p{Alnum}_./:-])",
                 Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
         return token.matcher(text).find();
+    }
+
+    private static void addAllowedIdentifier(String query, Set<String> identifiers, String rawIdentifier) {
+        String identifier = rawIdentifier.replaceFirst("\\.+$", "");
+        if (identifier.isEmpty()) {
+            return;
+        }
+        boolean hasLetter = identifier.codePoints().anyMatch(Character::isLetter);
+        if (hasLetter || isNamedNumericCode(query, identifier)) {
+            identifiers.add(identifier.toLowerCase(Locale.ROOT));
+        }
     }
 
     private static boolean isNamedNumericCode(String query, String identifier) {

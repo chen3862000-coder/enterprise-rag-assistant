@@ -134,6 +134,46 @@ class HybridRetrievalSecurityIT {
     }
 
     @Test
+    void multilingualLexicalTermsAndTechnicalIdentifiersAreIndexedForNewChunks() {
+        ingestion.ingest(new IngestionRequest("doc-okr-multilingual", "OKR overview", "PUBLIC", "PUBLIC",
+                Set.of("PUBLIC"), "okr.txt", "# OKR\n目标与关键结果 (OKR) uses objective tracking code OKR-204."
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), null));
+
+        assertThat(retrieval.keyword("什么是OKR OKR", Set.of("PUBLIC"), 20))
+                .extracting(RetrievalCandidate::documentId).contains("doc-okr-multilingual");
+        assertThat(retrieval.exact("okr-204", Set.of("PUBLIC"), 20))
+                .extracting(RetrievalCandidate::documentId).contains("doc-okr-multilingual");
+        assertThat(retrieval.exact("okr", Set.of("PUBLIC"), 20))
+                .extracting(RetrievalCandidate::documentId).contains("doc-okr-multilingual");
+        assertThat(jdbc.queryForObject("SELECT lexical_terms @> ARRAY['目标','标与','关键']::text[] "
+                + "AND technical_identifiers @> ARRAY['okr-204']::text[] FROM document_chunks "
+                + "WHERE id = 'doc-okr-multilingual-v1-c0'", Boolean.class)).isTrue();
+    }
+
+    @Test
+    void multilingualKeywordChannelStillAppliesAclBeforeReturningCandidates() {
+        jdbc.update("UPDATE document_chunks SET chunk_text = 'OKR 目标与关键结果 confidential HR detail.' "
+                + "WHERE id = 'doc-hr-v1-c0'");
+
+        assertThat(retrieval.keyword("什么是OKR OKR", Set.of("ENGINEERING", "PUBLIC"), 20))
+                .extracting(RetrievalCandidate::documentId).doesNotContain("doc-hr");
+        assertThat(retrieval.keyword("什么是OKR OKR", Set.of("HR"), 20))
+                .extracting(RetrievalCandidate::documentId).contains("doc-hr");
+    }
+
+    @Test
+    void englishKeywordCoverageUsesPostgresStemmedQueryLexemes() {
+        jdbc.update("UPDATE document_chunks SET chunk_text = 'Employees receive 20 days annual leave.' "
+                + "WHERE id = 'doc-hr-v1-c0'");
+
+        var candidates = retrieval.keyword("How many annual leave days do employees receive?", Set.of("HR"), 20);
+
+        assertThat(candidates).extracting(RetrievalCandidate::documentId).contains("doc-hr");
+        assertThat(candidates.stream().mapToDouble(RetrievalCandidate::lexicalCoverage).max().orElse(0.0))
+                .isGreaterThanOrEqualTo(0.30);
+    }
+
+    @Test
     void rolledBackQueryMatchesRollbackSourceAndPassesEvidenceGate() {
         jdbc.update("UPDATE document_chunks SET chunk_text = 'For the current gateway deployment, restore the most recent healthy artifact during rollback.' "
                 + "WHERE id = 'doc-engineering-v1-c0'");

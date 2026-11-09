@@ -37,10 +37,16 @@ public final class PrefixShadowEvaluator {
     public PrefixShadowResult evaluate(List<EvaluationScenario> fixtures) {
         Map<Set<String>, List<EmbeddedChunk>> authorizedVectors = new HashMap<>();
         Map<String, PrefixScenarioResult> results = new HashMap<>();
-        for (EvaluationScenario scenario : fixtures) {
+        List<float[]> queryVectors = embeddings.embed(fixtures.stream()
+                .map(scenario -> QUERY_PREFIX + scenario.query()).toList());
+        if (queryVectors.size() != fixtures.size()) {
+            throw new IllegalStateException("Prefix shadow query embedding count does not match scenarios");
+        }
+        for (int index = 0; index < fixtures.size(); index++) {
+            EvaluationScenario scenario = fixtures.get(index);
             Set<String> roles = Set.copyOf(roleResolver.rolesFor(scenario.user()));
             List<EmbeddedChunk> documents = authorizedVectors.computeIfAbsent(roles, this::embedAuthorizedChunks);
-            float[] queryVector = embeddings.embed(QUERY_PREFIX + scenario.query());
+            float[] queryVector = queryVectors.get(index);
             List<RankedChunk> ranked = rank(documents, queryVector);
             EvidenceSufficiencyGate.Decision decision = gate.evaluate(scenario.query(), ranked,
                     Set.copyOf(scenario.expectedDocumentIds()), roles);

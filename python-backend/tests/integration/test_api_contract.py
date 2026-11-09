@@ -71,11 +71,20 @@ def test_auth_document_lifecycle_source_and_trace_error_shapes(
         storage.ingest(
             data, lambda: ([Chunk(0, "contract source text", "Policy", None)], FixedEmbeddings().embed(["x"]))
         )
-        assert client.get("/api/documents").json()[0]["id"] == "doc-api-contract"
+        listed_document = client.get("/api/documents").json()[0]
+        assert listed_document["id"] == "doc-api-contract"
+        assert listed_document["allowedRoles"] == ["PUBLIC"]
+        alice_token = client.get("/api/auth/csrf").json()["token"]
+        client.post("/api/auth/login", json={"username": "alice"}, headers={"X-CSRF-TOKEN": alice_token})
+        visible_document = client.get("/api/documents").json()[0]
+        assert visible_document["id"] == "doc-api-contract"
+        assert visible_document["allowedRoles"] == []
         assert client.get("/api/documents/doc-api-contract/versions").json()[0]["version"] == 1
         source_id = "doc-api-contract-v1-c0"
         assert client.get(f"/api/sources/{source_id}").json()["text"] == "contract source text"
         assert client.get("/api/sources/not.valid").status_code == 404
+        token = client.get("/api/auth/csrf").json()["token"]
+        client.post("/api/auth/login", json={"username": "carol"}, headers={"X-CSRF-TOKEN": token})
         token = client.get("/api/auth/csrf").json()["token"]
         assert (
             client.post(

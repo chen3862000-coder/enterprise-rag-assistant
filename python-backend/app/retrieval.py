@@ -82,7 +82,7 @@ SPECIAL_REJECTIONS = (
 
 @dataclass(frozen=True)
 class RetrievalResult:
-    """Fused authorized candidates, evidence decision, gate reason, and raw method counts."""
+    """Pre-gate fused candidates, admitted context, evidence decision, and raw method counts."""
 
     candidates: list[dict[str, Any]]
     sufficient: bool
@@ -91,6 +91,7 @@ class RetrievalResult:
     keyword_count: int
     exact_count: int
     query_diagnostics: dict[str, Any] | None = None
+    pre_gate_candidates: list[dict[str, Any]] | None = None
 
 
 class HybridRetriever:
@@ -122,7 +123,6 @@ class HybridRetriever:
         query = unicodedata.normalize("NFKC", " ".join((gate_query or original).strip().split()))
         if not original or len(original) > 2000 or not query or len(query) > 2000:
             raise ValueError("Message must contain 1-2000 characters")
-        normalized_original = normalize_query(original)
         query_set = _retrieval_query_set(original, plan)
         normalized_query_keys = {normalize_query(original).casefold()}
         channel_map = {
@@ -183,8 +183,7 @@ class HybridRetriever:
         baseline = self._fuse([_best_rank_per_chunk(rows) for rows in baseline_rows])
         rewritten = self._fuse([_best_rank_per_chunk(rows) for rows in rewritten_rows])
         fused = self._fuse(rankings)
-        terms = query_terms(gate_query or query)
-        terms.update(query_terms(normalized_original))
+        terms = gate_query_terms(gate_query or query)
         terms.update(token for token in _query_identifiers(original) if len(token) > 2)
         passing, reason = evidence_decision(
             query,
@@ -209,6 +208,7 @@ class HybridRetriever:
                 "rewrittenDocumentIds": _document_ids(rewritten),
                 "combinedDocumentIds": _document_ids(fused),
             },
+            pre_gate_candidates=fused,
         )
 
     def _fuse(self, rankings: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -242,6 +242,20 @@ def query_terms(query: str) -> set[str]:
         if len(run) == 1:
             terms.add(run)
     return terms
+
+
+def gate_query_terms(query: str) -> set[str]:
+    """Count the larger language-specific lexical view without double-counting CJK runs."""
+
+    normalized = unicodedata.normalize("NFKC", query).lower()
+    latin_terms = {term for term in re.split(r"[^a-z0-9]+", normalized) if len(term) > 2}
+    bigram_terms: set[str] = set()
+    for run in CJK_RUN.findall(normalized):
+        if len(run) == 1:
+            bigram_terms.add(run)
+        else:
+            bigram_terms.update(run[index : index + 2] for index in range(len(run) - 1))
+    return latin_terms if len(latin_terms) >= len(bigram_terms) else bigram_terms
 
 
 def normalized_query_for_gate(query: str) -> str:
@@ -307,8 +321,7 @@ def _query_identifiers(query: str) -> list[str]:
 
     query = unicodedata.normalize("NFKC", query)
     matches = [match.group() for match in [*IDENTIFIER.finditer(query), *API_SYMBOL.finditer(query)]]
-    technical_identifier = bool(re.search(r"[0-9]|[-_]", query)) or bool(HEADER_IDENTIFIER.search(query))
-    if CJK_RUN.search(query) or technical_identifier:
+    if CJK_RUN.search(query):
         matches.extend(match.group() for match in ASCII_IDENTIFIER.finditer(query))
     matches.extend(match.group() for match in HEADER_IDENTIFIER.finditer(query))
     status_match = re.search(r"\b(?:http|status|error|code)\s*[-:]?\s*([0-9]{3})\b", query, re.I)
@@ -345,19 +358,17 @@ def exact_matches(query: str, candidates: list[dict[str, Any]]) -> list[dict[str
             and len(query_identifiers) > 1
         ):
             return []
-        if _sensitive_query(query):
-            return []
         matched = indexed & query_identifiers
         if not matched:
             return []
-        if len(matched) != 1:
-            return []
         if re.search(r"\b(?:compare|versus|vs|difference|between)\b", query, re.I):
+            return []
+        if len(matched) != 1:
             return []
         return [
             candidate
             for candidate in candidates
-            if candidate.get("matched_identifier", "").lower() in matched and candidate["vector"] >= 0.35
+            if candidate.get("matched_identifier", "").lower() in matched
         ]
     found = set(_query_identifiers(query))
     normalized_query = normalized_query_for_gate(query)
@@ -447,9 +458,7 @@ def evidence_decision(
         if pattern.search(policy_query) and role not in roles:
             return [], reason
     if exact:
-        vector_supported = [candidate for candidate in exact if candidate["vector"] >= vector_minimum]
-        if vector_supported:
-            return vector_supported, "EXACT_IDENTIFIER_MATCH"
+        return exact, "EXACT_IDENTIFIER_MATCH"
     terms = gate_terms if gate_terms is not None else query_terms(query)
     count = len(terms)
     minimum_coverage = 0.30 if count <= 3 else 0.35 if count <= 6 else 0.40

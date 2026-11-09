@@ -25,6 +25,8 @@ public class EvaluationService {
     private final double minimumVectorSimilarity;
     private final double minimumKeywordScore;
     private final String embeddingModelId;
+    private final String queryPlannerExecutionMode;
+    private final boolean prefixShadowEnabled;
 
     public EvaluationService(
             EvaluationDatasetLoader datasetLoader,
@@ -38,7 +40,11 @@ public class EvaluationService {
             @Value("${app.retrieval.rrf-constant:60}") int rrfConstant,
             @Value("${app.retrieval.minimum-vector-similarity:0.35}") double minimumVectorSimilarity,
             @Value("${app.retrieval.minimum-keyword-score:0.0005}") double minimumKeywordScore,
-            @Value("${app.ingestion.embedding-model-id:nomic-embed-text}") String embeddingModelId) {
+            @Value("${app.ingestion.embedding-model-id:nomic-embed-text}") String embeddingModelId,
+            @Value("${app.query-planner.enabled:true}") boolean queryPlannerEnabled,
+            @Value("${app.query-planner.provider:deterministic}") String queryPlannerProvider,
+            @Value("${spring.ai.deepseek.api-key:}") String queryPlannerApiKey,
+            @Value("${app.evaluation.prefix-shadow-enabled:false}") boolean prefixShadowEnabled) {
         this.datasetLoader = datasetLoader;
         this.evaluator = evaluator;
         this.prefixShadowEvaluator = prefixShadowEvaluator;
@@ -51,13 +57,24 @@ public class EvaluationService {
         this.minimumVectorSimilarity = minimumVectorSimilarity;
         this.minimumKeywordScore = minimumKeywordScore;
         this.embeddingModelId = embeddingModelId;
+        this.queryPlannerExecutionMode = queryPlannerEnabled && "deepseek".equalsIgnoreCase(queryPlannerProvider)
+                && !queryPlannerApiKey.isBlank() ? "CONFIGURED_MODEL_ALLOWED" : "DETERMINISTIC_ONLY";
+        this.prefixShadowEnabled = prefixShadowEnabled;
     }
 
-    /** Evaluates the checked-in dataset without calling the answer-generation model and persists the measured run. */
-    public EvaluationRunResult run(String requestedBy) {
+    /** Evaluates and persists development and held-out datasets as independent, versioned reports. */
+    public EvaluationReports run(String requestedBy) {
+        EvaluationDataset development = datasetLoader.load();
+        EvaluationDataset heldout = datasetLoader.loadHeldout();
+        EvaluationRunResult developmentRun = runDataset(development, requestedBy, true);
+        EvaluationRunResult heldoutRun = runDataset(heldout, requestedBy, false);
+        return new EvaluationReports(developmentRun, heldoutRun);
+    }
+
+    private EvaluationRunResult runDataset(EvaluationDataset dataset, String requestedBy, boolean includeReleaseDecision) {
         Instant started = Instant.now();
-        EvaluationDataset dataset = datasetLoader.load();
-        PrefixShadowEvaluator.PrefixShadowResult shadow = prefixShadowEvaluator.evaluate(dataset.scenarios());
+        PrefixShadowEvaluator.PrefixShadowResult shadow = prefixShadowEnabled
+                ? prefixShadowEvaluator.evaluate(dataset.scenarios()) : unavailableShadow(dataset.scenarios());
         java.util.ArrayList<EvaluationScenarioResult> evaluated = new java.util.ArrayList<>();
         for (EvaluationScenario scenario : dataset.scenarios()) {
             evaluated.add(evaluator.evaluate(scenario, shadow.scenarios().get(scenario.id())));
@@ -69,10 +86,12 @@ public class EvaluationService {
                 baseMetrics.meanReciprocalRank(), baseMetrics.aclLeakageCount(), baseMetrics.freshnessAccuracy(),
                 baseMetrics.citationIdValidationAccuracy(), baseMetrics.evidenceGateAccuracy(),
                 baseMetrics.evidenceGateFalseAbstentionRate(), baseMetrics.evidenceGateFalseAdmissionRate(),
-                baseMetrics.releaseQualityPassed(),
-                baseMetrics.gateAblationMetrics(), new EvaluationMetrics.PrefixShadowMetrics(true, shadow.recallAt5(),
-                shadow.meanReciprocalRank(), shadow.evidenceGateAccuracy(), shadow.falseAbstentionCount(),
-                shadow.falseAdmissionCount()));
+                includeReleaseDecision ? baseMetrics.releaseQualityPassed() : null,
+                baseMetrics.gateAblationMetrics(), prefixShadowEnabled
+                        ? new EvaluationMetrics.PrefixShadowMetrics(true, shadow.recallAt5(),
+                                shadow.meanReciprocalRank(), shadow.evidenceGateAccuracy(), shadow.falseAbstentionCount(),
+                                shadow.falseAdmissionCount())
+                        : EvaluationMetrics.PrefixShadowMetrics.empty());
         Map<String, Object> config = retrievalConfiguration();
         EvaluationRunResult result = new EvaluationRunResult(UUID.randomUUID(), dataset.version(), "OFFLINE_RETRIEVAL",
                 embeddingModelId, config, results.size(), calculatedMetrics, "SUCCEEDED", started, completed, results);
@@ -98,19 +117,32 @@ public class EvaluationService {
         configuration.put("rrfConstant", rrfConstant);
         configuration.put("minimumVectorSimilarity", minimumVectorSimilarity);
         configuration.put("minimumKeywordScore", minimumKeywordScore);
-        configuration.put("keywordQueryMode", "OR over PostgreSQL English stemmed terms");
-        configuration.put("gatePolicy", "same-chunk vector threshold + OR lexical score + adaptive term coverage + fail-closed intent/scope guards");
+        configuration.put("queryPlannerExecutionMode", queryPlannerExecutionMode);
+        configuration.put("queryPlannerTimeoutFallback", "DETERMINISTIC");
+        configuration.put("originalQueryBaselinePreserved", true);
+        configuration.put("keywordQueryMode", "English full-text plus indexed Latin tokens and CJK bigrams");
+        configuration.put("gatePolicy", "same-chunk vector threshold + multilingual lexical score + adaptive term coverage + fail-closed intent/scope guards");
         configuration.put("minimumLexicalCoverageShort", 0.30);
         configuration.put("minimumLexicalCoverageMedium", 0.35);
         configuration.put("minimumLexicalCoverageLong", 0.40);
         configuration.put("releaseMaximumFalseAbstentionRate", EvidenceSufficiencyGate.RELEASE_MAX_FALSE_ABSTENTION_RATE);
         configuration.put("releaseMaximumFalseAdmissionRate", EvidenceSufficiencyGate.RELEASE_MAX_FALSE_ADMISSION_RATE);
-        configuration.put("prefixShadow", "Nomic search_query/search_document over authorized in-memory chunks");
+        configuration.put("prefixShadow", prefixShadowEnabled
+                ? "Nomic search_query/search_document over authorized in-memory chunks"
+                : "disabled to keep standard reports bounded; separate experiment available by configuration");
         configuration.put("prefixShadowDocumentPrefix", "search_document: ");
         configuration.put("prefixShadowQueryPrefix", "search_query: ");
         configuration.put("prefixShadowDenseDepth", 10);
         configuration.put("gateReleaseMaxFalseAbstentionRate", EvidenceSufficiencyGate.RELEASE_MAX_FALSE_ABSTENTION_RATE);
         configuration.put("gateReleaseMaxFalseAdmissionRate", EvidenceSufficiencyGate.RELEASE_MAX_FALSE_ADMISSION_RATE);
         return Map.copyOf(configuration);
+    }
+
+    private static PrefixShadowEvaluator.PrefixShadowResult unavailableShadow(List<EvaluationScenario> scenarios) {
+        Map<String, PrefixShadowEvaluator.PrefixScenarioResult> results = scenarios.stream().collect(
+                java.util.stream.Collectors.toUnmodifiableMap(EvaluationScenario::id,
+                        scenario -> new PrefixShadowEvaluator.PrefixScenarioResult(List.of(), 0.0, 0.0,
+                                false, false, 0.0)));
+        return new PrefixShadowEvaluator.PrefixShadowResult(scenarios.size(), 0.0, 0.0, 0.0, 0, 0, results);
     }
 }

@@ -94,7 +94,7 @@ public class ChatService {
         long generationStarted = System.nanoTime();
         String answer;
         try {
-            answer = generator.generate(message, context);
+            answer = generator.generate(message, result.planningDiagnostics().intent(), context);
         } finally {
             progress.generationNanos = System.nanoTime() - generationStarted;
         }
@@ -110,7 +110,8 @@ public class ChatService {
             validated = insufficient("Citations identify supplied sources only; no answer claim was validated.");
         }
         grounding = validated.groundingStatus();
-        var response = new ChatResponse(validated.answer(), validated.citations(), traceId, validated.groundingStatus());
+        var response = new ChatResponse(validated.answer(), validated.citations(), traceId,
+                validated.groundingStatus(), result.planningDiagnostics().intent());
         persistTrace(traceId, username, message, createdAt, progress.retrievalNanos, progress.generationNanos,
                 System.nanoTime() - startedNanos, result, context.evidence().size(), validated.citations().size(),
                 grounding, "SUCCEEDED", null);
@@ -122,7 +123,7 @@ public class ChatService {
                                                   int contextCount, long retrievalNanos) {
         var response = new ChatResponse(
                 "I could not find sufficiently relevant authorized evidence to answer that question.",
-                java.util.List.of(), traceId, "INSUFFICIENT_EVIDENCE");
+                java.util.List.of(), traceId, "INSUFFICIENT_EVIDENCE", result.planningDiagnostics().intent());
         persistTrace(traceId, username, message, createdAt, retrievalNanos, 0, System.nanoTime() - startedNanos,
                 result, contextCount, 0, response.groundingStatus(), "SUCCEEDED", null);
         return response;
@@ -136,9 +137,10 @@ public class ChatService {
         var authorized = citationAccess.reauthorize(retrievalOnly.citations());
         boolean citationsComplete = !authorized.isEmpty() && authorized.size() == retrievalOnly.citations().size();
         var response = citationsComplete
-                ? new ChatResponse(retrievalOnly.answer(), authorized, traceId, retrievalOnly.groundingStatus())
+                ? new ChatResponse(retrievalOnly.answer(), authorized, traceId, retrievalOnly.groundingStatus(),
+                        result.planningDiagnostics().intent())
                 : new ChatResponse("Authorized source evidence changed during retrieval. Please retry.",
-                        java.util.List.of(), traceId, "INSUFFICIENT_EVIDENCE");
+                        java.util.List.of(), traceId, "INSUFFICIENT_EVIDENCE", result.planningDiagnostics().intent());
         persistTrace(traceId, username, message, createdAt, retrievalNanos, 0, System.nanoTime() - startedNanos,
                 result, evidence.size(), authorized.size(), response.groundingStatus(), "SUCCEEDED", null);
         return response;
@@ -193,7 +195,8 @@ public class ChatService {
                     retrievalResult.keywordCandidates(), retrievalResult.exactCandidates(), contextCount,
                     citationCount, retrievalResult.evidenceSufficient(), retrievalResult.gateReason(),
                     providerName(), activeModelId(), groundingStatus, status, errorCategory,
-                    generator.enabled() ? "GENERATED" : "RETRIEVAL_ONLY", createdAt),
+                    generator.enabled() ? "GENERATED" : "RETRIEVAL_ONLY", createdAt,
+                    retrievalResult.planningDiagnostics()),
                     ContentHasher.sha256(message.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         } catch (org.springframework.dao.DataAccessException exception) {
             org.slf4j.LoggerFactory.getLogger(ChatService.class).warn("Unable to persist RAG trace {}", traceId);

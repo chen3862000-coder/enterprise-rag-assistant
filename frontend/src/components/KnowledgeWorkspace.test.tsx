@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { canRetryFirstUpload, documentStatusLabel, ingestionProgressLabel, uploadErrorMessage } from './KnowledgeWorkspace'
+import { canRetryFirstUpload, documentStatusLabel, ingestionProgressLabel, selectedAllowedRoles, uploadErrorMessage } from './KnowledgeWorkspace'
 
 describe('KnowledgeWorkspace upload errors', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -35,5 +35,25 @@ describe('KnowledgeWorkspace document status', () => {
 
   it('renders backend-polled ingestion chunk progress', () => {
     expect(ingestionProgressLabel(64)).toBe('64 chunks completed. You can close this dialog; the backend continues processing.')
+  })
+})
+
+describe('KnowledgeWorkspace ACL selection', () => {
+  it('requires explicit allowed roles and normalizes checkbox values', () => {
+    const empty = new FormData()
+    expect(selectedAllowedRoles(empty)).toEqual([])
+
+    const selected = new FormData()
+    selected.append('allowedRole', 'engineering')
+    selected.append('allowedRole', 'HR')
+    selected.append('allowedRole', 'ENGINEERING')
+    expect(selectedAllowedRoles(selected)).toEqual(['ENGINEERING', 'HR'])
+  })
+
+  it('preserves no default role for a new upload and existing roles for a retry', () => {
+    expect(selectedAllowedRoles(new FormData())).toEqual([])
+    const retry = new FormData()
+    for (const role of ['HR', 'SECURITY_ADMIN']) retry.append('allowedRole', role)
+    expect(selectedAllowedRoles(retry)).toEqual(['HR', 'SECURITY_ADMIN'])
   })
 })

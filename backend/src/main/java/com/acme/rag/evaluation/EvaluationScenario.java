@@ -1,7 +1,10 @@
 package com.acme.rag.evaluation;
 
 import java.util.List;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+/** Dataset fixture contract shared by development and held-out retrieval evaluations. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record EvaluationScenario(
         String id,
         EvaluationCategory category,

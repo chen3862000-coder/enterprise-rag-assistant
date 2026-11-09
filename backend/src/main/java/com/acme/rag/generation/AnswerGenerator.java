@@ -48,6 +48,11 @@ public class AnswerGenerator {
     }
 
     public String generate(String question, AssembledContext context) {
+        return generate(question, com.acme.rag.retrieval.QueryIntent.UNKNOWN, context);
+    }
+
+    /** Uses planner intent only to describe response style; supplied evidence remains the sole factual source. */
+    public String generate(String question, com.acme.rag.retrieval.QueryIntent intent, AssembledContext context) {
         if (context.evidence().isEmpty()) {
             return ABSTENTION;
         }
@@ -57,7 +62,8 @@ public class AnswerGenerator {
                     .collect(java.util.stream.Collectors.joining(" "));
             return "Answer generation is disabled. Review the authorized retrieved evidence: " + references;
         }
-        String promptText = "Question:\n" + question + "\n\nAuthorized evidence:\n" + context.promptContext();
+        String promptText = "Requested response intent: " + intent.name() + ". Treat this as style guidance only.\n"
+                + "Question:\n" + question + "\n\nAuthorized evidence:\n" + context.promptContext();
         ChatResponse response = model.call(new Prompt(new SystemMessage(SYSTEM_INSTRUCTIONS), new UserMessage(promptText)));
         String answer = Optional.ofNullable(response)
                 .map(ChatResponse::getResult)

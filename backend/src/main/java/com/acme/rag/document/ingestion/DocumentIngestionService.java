@@ -5,6 +5,8 @@ import com.acme.rag.document.chunking.DocumentChunker;
 import com.acme.rag.document.parsing.DocumentParser;
 import com.acme.rag.document.parsing.ParsedDocument;
 import java.util.List;
+import java.util.UUID;
+import java.util.Set;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import com.acme.rag.observability.RagMetrics;
@@ -22,21 +24,80 @@ public class DocumentIngestionService {
     private final List<DocumentParser> parsers;
     private final DocumentChunker chunker;
     private final RagMetrics metrics;
+    private final DurableIngestionService durableIngestion;
 
-    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "DocumentChunker is final and holds only validated primitive configuration")
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2",
+            justification = "Injected Spring collaborators are private and are not exposed")
+    @org.springframework.beans.factory.annotation.Autowired
     public DocumentIngestionService(
             UploadValidator validator,
             DocumentVersionRepository versions,
+            IngestionJobRepository jobs,
+            IngestionJobWorkerRepository jobWorkers,
             EmbeddingService embeddings,
             List<DocumentParser> parsers,
             DocumentChunker chunker,
-            RagMetrics metrics) {
+            RagMetrics metrics,
+            DurableSourceStorage sourceStorage,
+            @org.springframework.beans.factory.annotation.Value("${app.ingestion.batch-size:32}") int batchSize,
+            @org.springframework.beans.factory.annotation.Value("${app.ingestion.max-attempts:8}") int maximumAttempts,
+            @org.springframework.beans.factory.annotation.Value("${app.ingestion.retry-delay-ms:2000}") long retryDelayMillis,
+            @org.springframework.beans.factory.annotation.Value("${app.ingestion.worker-enabled:true}") boolean workerEnabled,
+            @org.springframework.beans.factory.annotation.Value("${app.ingestion.worker-concurrency:2}") int workerConcurrency,
+            @org.springframework.beans.factory.annotation.Qualifier("ingestionWorkerExecutor")
+            org.springframework.core.task.TaskExecutor workerExecutor) {
         this.validator = validator;
         this.versions = versions;
         this.embeddings = embeddings;
         this.parsers = List.copyOf(parsers);
         this.chunker = chunker;
         this.metrics = metrics;
+        this.durableIngestion = new DurableIngestionService(validator, versions, jobs, jobWorkers, embeddings,
+                parsers, chunker, metrics, sourceStorage, batchSize, maximumAttempts, workerEnabled,
+                workerConcurrency, workerExecutor);
+    }
+
+    DocumentIngestionService(UploadValidator validator, DocumentVersionRepository versions,
+                             IngestionJobRepository jobs, IngestionJobWorkerRepository jobWorkers,
+                             EmbeddingService embeddings,
+                             List<DocumentParser> parsers, DocumentChunker chunker, RagMetrics metrics)
+    {
+        this(validator, versions, jobs, jobWorkers, embeddings, parsers, chunker, metrics,
+                new DurableSourceStorage(System.getProperty("java.io.tmpdir") + "/enterprise-rag-ingestion",
+                        10_485_760),
+                32, 8, 2_000, false, 2, Runnable::run);
+    }
+
+    public IngestionResult enqueue(IngestionRequest metadataRequest, java.io.InputStream input) {
+        return durableIngestion.enqueue(metadataRequest, input);
+    }
+
+    /** Runs one queue poll, claiming work transactionally and committing bounded chunks with heartbeats. */
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelayString = "${app.ingestion.worker-poll-ms:2000}")
+    public void processQueuedJobs() {
+        durableIngestion.processQueuedJobs();
+    }
+
+    /** Exposes only status records selected under the caller's document ACL. */
+    public List<IngestionJobStatus> jobs(String documentId, Set<String> roles, boolean admin) {
+        return durableIngestion.jobs(documentId, roles, admin);
+    }
+
+    /** Looks up a job only when the caller can access its associated document. */
+    public IngestionJobStatus job(UUID id, Set<String> roles, boolean admin) {
+        return durableIngestion.job(id, roles, admin);
+    }
+
+    /** Requeues leased jobs on process startup; committed chunk checkpoints remain available. */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void recoverWorkerLeases() {
+        durableIngestion.recoverWorkerLeases();
+    }
+
+    /** Refreshes worker leases during slow extraction or embedding calls. */
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelayString = "${app.ingestion.heartbeat-ms:30000}")
+    public void heartbeatWorker() {
+        durableIngestion.heartbeatWorker();
     }
 
     /**
@@ -81,17 +142,17 @@ public class DocumentIngestionService {
             metrics.ingestion(true);
             return result(upload.documentId(), reservation, chunks.size());
         } catch (IngestionException exception) {
-            versions.fail(upload.documentId(), reservation, exception, upload.seedManaged());
+            durableIngestion.fail(upload.documentId(), reservation, exception, upload.seedManaged());
             metrics.ingestion(false);
             throw exception;
         } catch (IllegalArgumentException | DataAccessException exception) {
-            versions.fail(upload.documentId(), reservation, exception, upload.seedManaged());
+            durableIngestion.fail(upload.documentId(), reservation, exception, upload.seedManaged());
             metrics.ingestion(false);
             throw new IngestionException(IngestionException.Kind.UNPROCESSABLE, safeFailureMessage(exception), exception);
         }
     }
 
-    private static String safeFailureMessage(RuntimeException exception) {
+    static String safeFailureMessage(RuntimeException exception) {
         Throwable cause = exception;
         while (cause.getCause() != null && cause.getCause() != cause) {
             cause = cause.getCause();

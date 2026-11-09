@@ -19,7 +19,24 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 @Component
 public final class EvaluationDatasetLoader {
-    public static final String DATASET_VERSION = "2026-10-p1-v5";
+    public static final String DEVELOPMENT_DATASET_VERSION = "2026-10-p1-v5";
+    public static final String HELDOUT_DATASET_VERSION = "heldout-paraphrases-v3";
+    private static final Map<EvaluationCategory, Long> DEVELOPMENT_CATEGORY_COUNTS = Map.of(
+            EvaluationCategory.FACT_LOOKUP, 12L,
+            EvaluationCategory.MULTI_DOCUMENT_QA, 8L,
+            EvaluationCategory.KEYWORD_EXACT_MATCH, 8L,
+            EvaluationCategory.PERMISSION_ISOLATION, 12L,
+            EvaluationCategory.UNANSWERABLE, 8L,
+            EvaluationCategory.DOCUMENT_FRESHNESS, 6L,
+            EvaluationCategory.HARD_NEGATIVE, 9L);
+    private static final Map<EvaluationCategory, Long> HELDOUT_CATEGORY_COUNTS = Map.of(
+            EvaluationCategory.FACT_LOOKUP, 19L,
+            EvaluationCategory.MULTI_DOCUMENT_QA, 2L,
+            EvaluationCategory.KEYWORD_EXACT_MATCH, 3L,
+            EvaluationCategory.PERMISSION_ISOLATION, 2L,
+            EvaluationCategory.UNANSWERABLE, 2L,
+            EvaluationCategory.DOCUMENT_FRESHNESS, 2L,
+            EvaluationCategory.HARD_NEGATIVE, 10L);
     private final ObjectMapper mapper;
 
     @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "ObjectMapper is a shared Spring service dependency; this loader exposes no mapper reference")
@@ -28,7 +45,22 @@ public final class EvaluationDatasetLoader {
     }
 
     public EvaluationDataset load() {
-        try (InputStream stream = new ClassPathResource("evals/dataset.jsonl").getInputStream();
+        return load("evals/dataset.jsonl", DEVELOPMENT_DATASET_VERSION, DEVELOPMENT_CATEGORY_COUNTS);
+    }
+
+    /** Loads the separately versioned held-out fixtures without merging them into development data. */
+    public EvaluationDataset loadHeldout() {
+        EvaluationDataset heldout = load("evals/heldout-paraphrases.jsonl", HELDOUT_DATASET_VERSION,
+                HELDOUT_CATEGORY_COUNTS);
+        Set<String> developmentIds = load().scenarios().stream().map(EvaluationScenario::id).collect(Collectors.toSet());
+        if (heldout.scenarios().stream().map(EvaluationScenario::id).anyMatch(developmentIds::contains)) {
+            throw new IllegalStateException("Development and held-out evaluation scenario IDs must be disjoint");
+        }
+        return heldout;
+    }
+
+    private EvaluationDataset load(String resource, String version, Map<EvaluationCategory, Long> expectedCounts) {
+        try (InputStream stream = new ClassPathResource(resource).getInputStream();
              BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
             List<EvaluationScenario> scenarios = new ArrayList<>();
             String line;
@@ -37,32 +69,22 @@ public final class EvaluationDatasetLoader {
                     scenarios.add(mapper.readValue(line, EvaluationScenario.class));
                 }
             }
-            validate(scenarios);
-            return new EvaluationDataset(DATASET_VERSION, scenarios);
+            validate(scenarios, expectedCounts);
+            return new EvaluationDataset(version, scenarios);
         } catch (IOException | JacksonException exception) {
-            throw new IllegalStateException("Unable to load evaluation dataset", exception);
+            throw new IllegalStateException("Unable to load evaluation dataset " + version, exception);
         }
     }
 
-    private static void validate(List<EvaluationScenario> scenarios) {
+    private static void validate(List<EvaluationScenario> scenarios, Map<EvaluationCategory, Long> expectedCounts) {
         Set<String> ids = new HashSet<>();
         for (EvaluationScenario scenario : scenarios) {
             validateScenario(scenario, ids);
         }
-        if (scenarios.size() != 63) {
-            throw new IllegalStateException("Expected 63 evaluation scenarios, found " + scenarios.size());
-        }
         Map<EvaluationCategory, Long> counts = scenarios.stream()
                 .collect(Collectors.groupingBy(EvaluationScenario::category, Collectors.counting()));
-        Map<EvaluationCategory, Long> expected = Map.of(
-                EvaluationCategory.FACT_LOOKUP, 12L,
-                EvaluationCategory.MULTI_DOCUMENT_QA, 8L,
-                EvaluationCategory.KEYWORD_EXACT_MATCH, 8L,
-                EvaluationCategory.PERMISSION_ISOLATION, 12L,
-                EvaluationCategory.UNANSWERABLE, 8L,
-                EvaluationCategory.DOCUMENT_FRESHNESS, 6L,
-                EvaluationCategory.HARD_NEGATIVE, 9L);
-        if (!counts.equals(expected)) {
+        int expectedCount = expectedCounts.values().stream().mapToInt(Long::intValue).sum();
+        if (scenarios.size() != expectedCount || !counts.equals(expectedCounts)) {
             throw new IllegalStateException("Evaluation scenario category counts do not match the dataset specification");
         }
     }

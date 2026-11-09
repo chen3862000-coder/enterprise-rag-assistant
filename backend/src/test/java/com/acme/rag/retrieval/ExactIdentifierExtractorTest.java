@@ -18,4 +18,22 @@ class ExactIdentifierExtractorTest {
         assertThat(extractor.extract("Check IR-204. Then call API.v1."))
                 .containsExactly("ir-204", "api.v1");
     }
+
+    @Test
+    void extractsAsciiTechnicalNamesFromMixedCjkQueries() {
+        assertThat(extractor.extract("什么是OKR"))
+                .containsExactly("okr");
+    }
+
+    @Test
+    void extractsUppercaseSymbolsAndRequestHeaderNames() {
+        assertThat(extractor.extract("RDEXPEND and X-Request-Id"))
+                .containsExactly("rdexpend", "x-request-id");
+    }
+
+    @Test
+    void keepsAsciiErrorCodeSeparateFromAdjacentChineseText() {
+        assertThat(extractor.extract("GW-204 错误代码 means what?"))
+                .contains("gw-204");
+    }
 }

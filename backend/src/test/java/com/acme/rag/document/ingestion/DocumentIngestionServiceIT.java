@@ -205,6 +205,10 @@ class DocumentIngestionServiceIT {
         List<DocumentParser> parsers = List.of(new TextDocumentParser(), new PdfDocumentParser());
         TransactionTemplate transactionTemplate = new TransactionTemplate(
                 new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+        IngestionJobRepository jobRepository = new IngestionJobRepository(jdbc,
+                org.springframework.jdbc.core.simple.JdbcClient.create(jdbc), transactionTemplate);
+        IngestionJobWorkerRepository jobWorkers = new IngestionJobWorkerRepository(jdbc,
+                org.springframework.jdbc.core.simple.JdbcClient.create(jdbc), transactionTemplate);
         EmbeddingModel wrongDimensionModel = new EmbeddingModel() {
             @Override public float[] embed(org.springframework.ai.document.Document document) { return new float[2]; }
             @Override public EmbeddingResponse call(org.springframework.ai.embedding.EmbeddingRequest request) {
@@ -215,8 +219,8 @@ class DocumentIngestionServiceIT {
         };
         DocumentIngestionService invalidEmbeddingService = new DocumentIngestionService(
                 new UploadValidator(new UploadContentValidator(parsers, 10_485_760)),
-                new DocumentVersionRepository(jdbc, org.springframework.jdbc.core.simple.JdbcClient.create(jdbc), transactionTemplate,
-                        "bad-model", 768),
+                new DocumentVersionRepository(jdbc, org.springframework.jdbc.core.simple.JdbcClient.create(jdbc),
+                        transactionTemplate, jobRepository, "bad-model", 768), jobRepository, jobWorkers,
                 new EmbeddingService(wrongDimensionModel, 768),
                 parsers,
                 new DocumentChunker(1800, 240), new RagMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
@@ -296,11 +300,17 @@ class DocumentIngestionServiceIT {
         EmbeddingModel invalid = mock(EmbeddingModel.class);
         when(invalid.embedForResponse(org.mockito.ArgumentMatchers.<String>anyList()))
                 .thenReturn(new EmbeddingResponse(List.of(new org.springframework.ai.embedding.Embedding(new float[2], 0))));
+        TransactionTemplate transactionTemplate = new TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+        IngestionJobRepository jobRepository = new IngestionJobRepository(jdbc,
+                org.springframework.jdbc.core.simple.JdbcClient.create(jdbc), transactionTemplate);
+        IngestionJobWorkerRepository jobWorkers = new IngestionJobWorkerRepository(jdbc,
+                org.springframework.jdbc.core.simple.JdbcClient.create(jdbc), transactionTemplate);
         DocumentIngestionService service = new DocumentIngestionService(
                 new UploadValidator(new UploadContentValidator(parsers, 10_485_760)),
                 new DocumentVersionRepository(jdbc, org.springframework.jdbc.core.simple.JdbcClient.create(jdbc),
-                        new TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource())),
-                        "bad-model", 768), new EmbeddingService(invalid, 768), parsers, new DocumentChunker(1800, 240),
+                        transactionTemplate, jobRepository, "bad-model", 768), jobRepository, jobWorkers,
+                new EmbeddingService(invalid, 768), parsers, new DocumentChunker(1800, 240),
                 new RagMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
 
         assertThatThrownBy(() -> service.ingest(new IngestionRequest("doc-permission-version", "Policy", "HR", "CONFIDENTIAL",
@@ -315,9 +325,14 @@ class DocumentIngestionServiceIT {
         List<DocumentParser> parsers = List.of(new TextDocumentParser(), new PdfDocumentParser());
         TransactionTemplate transactionTemplate = new TransactionTemplate(
                 new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+        IngestionJobRepository jobRepository = new IngestionJobRepository(jdbc,
+                org.springframework.jdbc.core.simple.JdbcClient.create(jdbc), transactionTemplate);
+        IngestionJobWorkerRepository jobWorkers = new IngestionJobWorkerRepository(jdbc,
+                org.springframework.jdbc.core.simple.JdbcClient.create(jdbc), transactionTemplate);
         return new DocumentIngestionService(new UploadValidator(new UploadContentValidator(parsers, 10_485_760)),
                 new DocumentVersionRepository(jdbc, org.springframework.jdbc.core.simple.JdbcClient.create(jdbc),
-                        transactionTemplate, "test-model", 768), new EmbeddingService(model, 768), parsers,
+                        transactionTemplate, jobRepository, "test-model", 768), jobRepository, jobWorkers,
+                new EmbeddingService(model, 768), parsers,
                 new DocumentChunker(1800, 240),
                 new RagMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
     }

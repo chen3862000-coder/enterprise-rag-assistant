@@ -23,14 +23,19 @@ Offline evaluation and bounded observability support these domains. Demo identit
 flowchart LR
     User[Demo user / document administrator] --> UI[React + Vite workspace]
     UI -->|same-origin session REST + CSRF| Proxy[Nginx]
-    Proxy --> API[Spring Boot modular monolith]
+    Proxy --> API[Selected Spring Boot or FastAPI modular backend]
     API --> DB[(PostgreSQL + pgvector)]
     API --> Ollama[Ollama embedding model]
-    API -. optional generation .-> Chat[DeepSeek ChatModel]
+    API -. optional bounded query planner .-> Planner[DeepSeek planner API]
+    API -. optional answer generation .-> Chat[DeepSeek ChatModel]
+    API --> Worker[Durable ingestion job worker]
+    Worker --> DB
+    Worker --> Ollama
+    Worker --> CHM[Bounded 7-Zip CHM HTML extraction]
     Seed[Synthetic document corpus] -->|startup ingestion when enabled| API
 ```
 
-The local Compose topology runs PostgreSQL/pgvector, Ollama, a one-shot embedding-model initialization service, the Spring backend, and the React static application served by Nginx. Nginx proxies `/api/` and `/actuator/` to the backend; only the frontend port is published by Compose. The backend uses PostgreSQL both as relational system of record and vector store. Ollama provides embeddings for ingestion and queries. Chat generation is optional: Compose defaults `CHAT_MODEL_PROVIDER=none`, while the standalone `application.yml` default is `deepseek`.
+The local Compose topology runs PostgreSQL/pgvector, Ollama, a one-shot embedding-model initialization service, one selected backend (Spring by default or Python via override), and the React static application served by Nginx. Nginx proxies `/api/` and `/actuator/` to the backend; only the frontend port is published by Compose. PostgreSQL is the relational system of record, vector store, and durable ingestion job queue. Ollama provides embeddings. Bounded query planning and answer generation are independent optional DeepSeek uses; query planning falls back deterministically, and answer generation defaults to `none` in Compose. Both backends support bounded CHM HTML extraction with backend-specific limits.
 
 The frontend presents chat/source inspection, knowledge management, and evaluation workspaces. It is a client of the backend, not an authority for identity, roles, document status, or permissions. `frontend/src/api.ts` sends same-origin cookie requests and CSRF tokens for mutations. Key runtime configuration and deployment details are in `compose.yaml`, `backend/src/main/resources/application.yml`, `frontend/nginx.conf`, and `README.md`.
 
@@ -49,13 +54,18 @@ flowchart LR
     HTTP[HTTP/API adapters]
     DB[(Shared PostgreSQL)]
     Embed[Ollama embeddings]
-    LLM[Optional DeepSeek generation]
+    Planner[Optional bounded query planner]
+    LLM[Optional DeepSeek answer generation]
+    Worker[Durable ingestion worker]
+    CHM[Bounded CHM parser]
 
     HTTP --> Identity
     HTTP --> Knowledge
     HTTP --> Answering
     HTTP --> Evaluation
     HTTP --> Observability
+    HTTP --> Planner
+    HTTP --> Worker
     Knowledge --> Identity
     Retrieval --> Identity
     Answering --> Retrieval
@@ -68,20 +78,22 @@ flowchart LR
     Observability --> DB
     Knowledge --> Embed
     Retrieval --> Embed
+    Worker --> CHM
+    Planner -. query text only .-> LLM
     Answering -. optional .-> LLM
 ```
 
 | Context | Responsibility and implementation | Relationships |
 |---|---|---|
 | **Demo Identity & Access** | Resolves the fixed Alice/Bob/Carol demo identities into server-controlled retrieval roles and a separate `documentAdmin` capability; creates session authentication. Main code: `security/DemoIdentityService`, `DemoAuthenticationService`, `CurrentIdentity`, `SecurityConfiguration`. | Provides the authenticated principal and access scope consumed by document, retrieval, citation, evaluation, and trace operations. It is deliberately not a general enterprise identity context. |
-| **Knowledge Lifecycle & Ingestion** | Validates uploads, parses Markdown/text/extractable PDFs, chunks and embeds content, reserves versions, persists chunks, changes metadata/permissions, and activates or fails versions. Main code: `document/ingestion/DocumentIngestionService`, `DocumentVersionRepository`, `DocumentManagementRepository`; parsers and chunking under `document/parsing` and `document/chunking`. | Uses identity capability checks at the API boundary, Ollama for vectors, and PostgreSQL for documents, versions, jobs, permissions, chunks, and embeddings. |
-| **Authorized Retrieval & Evidence Policy** | Runs vector, full-text, and exact-identifier retrieval under SQL ACL/status/version predicates; fuses ranks and makes a deterministic evidence-sufficiency decision. Main code: `retrieval/HybridRetrievalService`, `HybridRetrievalRepository`, `ReciprocalRankFusion`, `EvidenceSufficiencyGate`, `RetrievalIntentPolicy`. | Consumes a server-derived role scope and the active knowledge index. Supplies authorized ranked evidence to answering and evaluation. |
+| **Knowledge Lifecycle & Ingestion** | Validates uploads, parses Markdown/text/extractable PDFs/bounded CHM HTML, chunks and embeds content, reserves durable jobs, commits progress batches, changes metadata/permissions, and activates or fails versions. Main code: `document/ingestion/DocumentIngestionService`, `DocumentVersionRepository`, `DurableSourceStorage`; parsers and chunking under `document/parsing` and `document/chunking`. | Uses identity capability checks at the API boundary, Ollama for vectors, 7-Zip for bounded CHM extraction, and PostgreSQL for documents, versions, jobs, permissions, chunks, and embeddings. |
+| **Authorized Retrieval & Evidence Policy** | Plans bounded query formulations, then runs vector, English full-text, multilingual lexical-term, and exact-identifier retrieval under SQL ACL/status/version predicates; fuses ranks and makes a deterministic evidence-sufficiency decision. Main code: `retrieval/QueryPlanningService`, `HybridRetrievalService`, `HybridRetrievalRepository`, `ReciprocalRankFusion`, `EvidenceSufficiencyGate`, `RetrievalIntentPolicy`. | The planner receives only the query; the original query is retained as a retrieval baseline. Planner output cannot define identity or access filters. Retrieval uses server-derived role scope. |
 | **Answering & Source References** | Orchestrates chat, bounded context assembly, optional generation, citation-ID validation, source authorization, and response construction. Main code: `generation/ChatService`, `AnswerGenerator`; `citation/ContextAssembler`, `CitationResponseBuilder`, `CitationAccessValidator`, `SourceRepository`. | Uses retrieval output and identity scope. An external chat model receives only evidence admitted by retrieval and the evidence gate. Source reads reauthorize against current access and version state. |
-| **Offline Evaluation** | Loads a checked-in scenario dataset, executes retrieval/gate scenarios, computes metrics and diagnostics, runs an isolated embedding-prefix shadow experiment, and persists run results. Main code: `evaluation/EvaluationService`, `EvaluationScenarioEvaluator`, `EvaluationMetricsCalculator`, `PrefixShadowEvaluator`, `EvaluationRunRepository`. | Uses the same hybrid retrieval and evidence gate as runtime chat, with fixed test role scopes. Evaluation is admin-triggered and does not call the chat provider or judge model. |
+| **Offline Evaluation** | Loads separate development and held-out datasets, executes retrieval/gate scenarios deterministically, computes independent metrics and diagnostics, runs an isolated embedding-prefix shadow experiment, and persists separate run results. Main code: `evaluation/EvaluationService`, `EvaluationScenarioEvaluator`, `EvaluationMetricsCalculator`, `PrefixShadowEvaluator`, `EvaluationRunRepository`. | Uses the same retrieval SQL and evidence gate with deterministic planner mode and fixed test role scopes. Evaluation does not call answer generation or a judge model. |
 | **Operational Observability** | Persists bounded chat trace records, exposes owner/admin trace reads, deletes records by retention, and records bounded Micrometer metrics. Main code: `observability/RagTrace`, `RagTraceRepository`, `TraceController`, `TraceRetentionJob`, `RagMetrics`. | Receives chat-request metadata from answering; evaluation updates bounded metrics but does not create chat traces. It is not an audit-grade event store and intentionally excludes raw query and source text. |
 | **HTTP/API adapters** | Maps REST requests/responses, multipart files, exceptions, and session operations. Main code: `api/*Controller`, with evaluation and trace controllers in their feature packages. | Translates transport input to application operations. Some current controllers directly invoke concrete repositories, which is a known layering weakness described below. |
 
-All contexts are deployed in one process and share one PostgreSQL database. The database is the transactional coordination boundary for version activation and the query-time ACL boundary for retrieval. Context communication is direct Java invocation, not messaging; there is no event bus or distributed job queue.
+All contexts are deployed in one process and share one PostgreSQL database. The database is the transactional coordination boundary for version activation, durable ingestion queue/checkpoints, and the query-time ACL boundary for retrieval. Context communication is direct invocation; there is no external message broker or separate distributed orchestration platform.
 
 ## Ubiquitous Language
 
@@ -90,7 +102,7 @@ All contexts are deployed in one process and share one PostgreSQL database. The 
 | **Logical document** | Stable document identity, keyed by `documents.id`; its identity remains stable as content versions change. |
 | **Document version** | A content snapshot with a monotonically increasing per-document version number, hash, source metadata, embedding identity/dimension, indexing status, and chunks. |
 | **Current version** | The version referenced by `documents.current_version_id` and eligible for retrieval when the document and version are active. |
-| **Ingestion job** | A persisted record of indexing progress and a bounded failure detail for a document version. Current work is synchronous in the request path despite persisted job status. |
+| **Ingestion job** | A persisted record of durable source, worker lease/heartbeat, retry schedule, chunk checkpoint, progress, and bounded failure detail for a document version. Upload returns before parsing/embedding; database-backed workers resume staged content after restart. |
 | **Allowed role / ACL** | A role name stored in `document_permissions` and matched to the authenticated server-side identity in SQL. It is not a department field supplied by the browser. |
 | **Document administrator** | Separate demo capability available to Carol for document-management and evaluation operations; it does not add retrieval roles. |
 | **Candidate** | A database-returned chunk eligible under the SQL access, document-status, and active-version predicates for a particular request scope. |
@@ -132,7 +144,7 @@ Authorization is not a prompt instruction or model responsibility. Candidate eli
 
 ### Evaluation and Observability
 
-An **EvaluationRun** is a persisted analytical record with dataset version, model/embedding identity, retrieval configuration, run status, summary metrics, and scenario results. The scenario and results are immutable values during the run. `EvaluationService` coordinates execution; `EvaluationRunRepository` persists it. The dataset is versioned JSONL (`evals/dataset.jsonl`), currently version `2026-10-p1-v5`, with 63 scenarios.
+An **EvaluationRun** is a persisted analytical record with dataset version, model/embedding identity, retrieval/planner configuration, run status, summary metrics, and scenario results. The scenario and results are immutable values during the run. `EvaluationService` coordinates execution; `EvaluationRunRepository` persists it. The 63-case development dataset (`2026-10-p1-v5`) and 40-case held-out dataset (`heldout-paraphrases-v3`) are run and persisted independently; metrics are not pooled.
 
 A **RagTrace** is a bounded operational record, not a domain event or full audit trail. The application stores query hash rather than raw query text, along with bounded counts/durations, provider/model, response mode, gate result, citation count, and status/error category. Trace persistence is best-effort on chat. Owner/admin authorization is applied on reads, and scheduled cleanup defaults to 30 days.
 
@@ -146,32 +158,36 @@ sequenceDiagram
     participant API as DocumentController
     participant App as DocumentIngestionService
     participant DB as PostgreSQL
+    participant Store as DurableSourceStorage
+    participant Worker as Ingestion worker
     participant Parser as Parser + Chunker
     participant Embed as Ollama
 
     Admin->>API: upload / reindex + metadata + allowed roles
     API->>API: require documentAdmin and map request
-    API->>App: ingest(request)
-    App->>App: validate type, size, and content metadata, then hash content
-    App->>DB: reserve document/version under transaction lock
-    DB-->>App: duplicate result or INDEXING reservation
-    alt new or failed version
-        App->>Parser: parse and chunk
-        Parser-->>App: parsed sections and chunks
-        App->>Embed: embed chunk text
-        Embed-->>App: vectors
-        App->>DB: transactionally persist chunks and activate version
-        DB-->>App: committed activation
-    else identical active content
-        App-->>API: reuse result and apply metadata or ACL changes
+    API->>Store: stream, size-check, hash, private durable source
+    API->>App: validate metadata and reserve job/version
+    App->>DB: advisory lock, persist source reference and queued job
+    DB-->>API: job ID / duplicate result
+    API-->>Admin: 202 Accepted + job ID
+    Worker->>DB: claim job with lease
+    Worker->>Store: read durable source and metadata
+    Worker->>Parser: parse and chunk, including bounded CHM HTML
+    Parser-->>Worker: parsed sections and chunks
+    loop bounded chunk batches
+        Worker->>Embed: embed current batch
+        Embed-->>Worker: vectors
+        Worker->>DB: persist inactive chunks and checkpoint
     end
-    App-->>API: ingestion result
-    API-->>Admin: version/job result
+    Worker->>DB: validate count, atomically activate version and ACL
+    Admin->>API: poll ACL-scoped job status
+    API->>DB: authorize status under document ACL
+    API-->>Admin: progress / terminal status
 ```
 
-The implemented workflow in `DocumentIngestionService` validates input, reserves or reuses a version, parses and chunks non-duplicate content, embeds it, then calls `DocumentVersionRepository.activate`. The repository obtains an advisory transaction lock keyed by logical document ID when reserving, and locks the document row while activating. Activation persists chunks, supersedes the former active version, activates the new version, updates the current-version pointer and document metadata/ACL, and marks the job successful in one transaction. A failure marks the pending version/job failed; the prior current version remains active. Identical current content avoids embedding/version creation while metadata and ACL changes are applied transactionally. Inactive documents require explicit restoration.
+The Java and Python upload paths store bounded sources and return `202` plus a job ID; workers persist staged chunks in batches with progress checkpoints and heartbeats. Java uses a bounded task executor and database leases; Python uses a PostgreSQL advisory-locked worker. Both validate the complete chunk count before activation. Activation supersedes the former active version, switches the current pointer and metadata/ACL, and completes the job transactionally. A failure leaves the prior active pointer intact; incomplete staged content remains excluded from retrieval. Job/status endpoints authorize the document under current server-derived roles. Identical current content avoids embedding/version creation while metadata and ACL changes are applied transactionally. Inactive documents require explicit restoration.
 
-This is a synchronous request workflow with persisted job status, not asynchronous distributed ingestion. The Java backend supports Markdown, plain text, and PDFs with extractable text. The alternate Python backend additionally supports bounded CHM HTML extraction; see `python-backend.md` for limits and extractor requirements. OCR is out of scope. The vector dimension is fixed at 768 by schema and configuration.
+This is asynchronous durable ingestion using database-backed jobs, not an external broker or distributed orchestration platform. Both backends support Markdown, plain text, extractable PDFs, and bounded CHM HTML extraction. Java uses the 7-Zip executable with configurable limits; Python uses `7z` with its own configured bounds. OCR is out of scope. PDF libraries and exact extraction output may differ. The vector dimension is fixed at 768 by schema and configuration.
 
 ### Chat, Retrieval, and Citation Resolution
 
@@ -180,6 +196,7 @@ sequenceDiagram
     actor User
     participant API as ChatController
     participant Chat as ChatService
+    participant Planner as QueryPlanningService
     participant Ret as HybridRetrievalService
     participant DB as PostgreSQL
     participant Gate as EvidenceSufficiencyGate
@@ -190,9 +207,16 @@ sequenceDiagram
 
     User->>API: authenticated question
     API->>Chat: chat(message)
-    Chat->>Ret: retrieve(message, server-derived roles)
-    Ret->>Ret: normalize and embed query
-    Ret->>DB: ACL-filtered vector + keyword + exact paths
+    Chat->>Planner: original query only
+    alt valid bounded planner response
+        Planner->>Planner: validate schema and preserve identifiers
+    else disabled, timeout, provider/schema failure
+        Planner->>Planner: deterministic fallback; retain original baseline
+    end
+    Planner-->>Chat: bounded query variants + answer-style intent only
+    Chat->>Ret: retrieve(original + variants, server-derived roles)
+    Ret->>Ret: embed vector variants; derive multilingual lexical terms
+    Ret->>DB: ACL-filtered vector + English FTS + Latin/CJK lexical + exact paths
     DB-->>Ret: authorized candidates only
     Ret->>Ret: RRF, deduplicate, apply evidence/intent policy
     Ret-->>Chat: admitted chunks + gate decision
@@ -213,15 +237,15 @@ sequenceDiagram
     end
 ```
 
-`HybridRetrievalService` normalizes a nonblank query (maximum 2,000 characters), embeds it, and requests vector, PostgreSQL full-text, and extracted exact-identifier candidates. `HybridRetrievalRepository` applies the same role, enabled-document, and active-version predicates in SQL on each path. `ReciprocalRankFusion` combines ranks without comparing raw scores and deduplicates by chunk identity. `EvidenceSufficiencyGate` then filters admitted context.
+`QueryPlanningService` retains the normalized original baseline, optionally calls a structured query-only DeepSeek planner with a strict typed response contract, and otherwise returns deterministic fallback. Planner output contains bounded intent/subject/constraint/retrieval variants only. `HybridRetrievalService` sends the original and selected variants through vector, PostgreSQL English full-text, indexed Latin/CJK lexical-term, and technical-identifier channels. `HybridRetrievalRepository` applies the same role, enabled-document, and active-version predicates in SQL on each path. `ReciprocalRankFusion` combines ranks without comparing raw scores and deduplicates by chunk identity. `EvidenceSufficiencyGate` evaluates the original request and filters admitted context; planner output cannot relax safety policy or authorization.
 
-The current gate is more specific than a simple vector-plus-keyword threshold. It admits a permitted exact identifier match, or requires the same candidate to meet minimum vector similarity, minimum keyword score, and adaptive lexical coverage (0.30/0.35/0.40 based on meaningful query-term count). `RetrievalIntentPolicy` can reject sensitive-value requests, unsupported future/historical/specialized requests, multi-identifier comparisons, and requests requiring a role scope the user lacks. This policy is deterministic and shared by chat and offline evaluation. It is calibrated to the synthetic English corpus, not a general semantic correctness guarantee.
+The current gate is more specific than a simple vector-plus-keyword threshold. It admits a permitted exact identifier match, or requires the same candidate to meet minimum vector similarity, minimum keyword score, and adaptive lexical coverage (0.30/0.35/0.40 based on meaningful query-term count). `RetrievalIntentPolicy` can reject sensitive-value requests, unsupported future/historical/specialized requests, multi-identifier comparisons, and requests requiring a role scope the user lacks. This policy is deterministic and shared by chat and offline evaluation. It is calibrated to a small synthetic corpus with multilingual fixtures, not a general semantic correctness guarantee.
 
 `ContextAssembler` preserves ranking, escapes angle-bracket delimiters in source text, labels sources as untrusted, assigns IDs only to included chunks, and enforces a 12,000-character default budget. It is character-bounded, not tokenizer-aware. Generation can be disabled; in that mode the system returns retrieval-only output. Generated citation IDs must refer to supplied evidence, and citation access is reauthorized before source metadata is returned. `CITATIONS_PRESENT` means authorized source IDs resolved; it does not mean claims were entailed or fact-checked. Unsafe/invalid results fall back to a safe response.
 
 ### Offline Evaluation
 
-`EvaluationService` loads and validates the versioned JSONL dataset, executes the scenarios with server-defined fixed role scopes through `HybridRetrievalService`, computes metrics, and persists the run and scenario diagnostics. The same evidence gate is used by runtime and evaluation. The evaluation path does not invoke DeepSeek or a judge model. The optional prefix-shadow experiment embeds authorized current chunks in memory using `search_document:` and queries using `search_query:`; those vectors are not persisted, do not replace the active index, and do not affect runtime chat.
+`EvaluationService` loads the 63-case development and separate 40-case held-out JSONL datasets, executes each with server-defined fixed role scopes through `HybridRetrievalService` in deterministic planner mode, computes independent metrics, and persists two distinct run records with scenario diagnostics. The same retrieval SQL and evidence gate are used by runtime and evaluation. Evaluation does not invoke answer generation or a judge model. The optional prefix-shadow experiment is disabled by default and can be enabled independently; it embeds authorized current chunks in memory using `search_document:` and queries using `search_query:`. Those vectors are not persisted and do not replace the active index or affect runtime chat.
 
 The suite measures retrieval (Recall@5/MRR), ACL leakage, freshness, citation-ID validator behavior, and evidence-gate outcomes. It does not evaluate generated answer correctness, claim entailment, or model abstention accuracy. Historical measurements in README and evaluation design docs are repository documentation, not results produced by this analysis.
 
@@ -290,15 +314,15 @@ These choices are pragmatic for a small modular monolith, but mean the code shou
 
 ## Technology and Deployment Decisions
 
-- **Modular monolith:** one Spring MVC backend keeps transactional version activation and authorization query paths straightforward; the current scale does not justify distributed services or queues.
-- **PostgreSQL + pgvector:** one relational/vector system of record, parameterized exact cosine search, PostgreSQL full text, and explicit SQL ACLs. Approximate indexes and separate search/vector systems are out of MVP scope.
+- **Modular monolith:** one selected Spring MVC or FastAPI backend keeps transactional version activation and authorization query paths straightforward; the current scale does not justify distributed services or an external queue broker.
+- **PostgreSQL + pgvector:** one relational/vector system of record, parameterized exact cosine search, English full-text plus indexed multilingual lexical terms, and explicit SQL ACLs. Approximate indexes and separate search/vector systems are out of MVP scope.
 - **Ollama embeddings:** local `nomic-embed-text` decouples indexing/query embeddings from optional answer generation.
-- **Optional DeepSeek generation:** generation provider is independently configured; retrieval and offline evaluation remain useful without a paid chat key.
+- **Optional DeepSeek planning and generation:** bounded query planning is independently configured from answer generation and deterministically falls back; retrieval and offline evaluation remain useful without a paid chat key.
 - **React/Vite + Nginx:** static UI and same-origin API proxy simplify browser cookie/CSRF behavior in the demo deployment.
 - **Compose:** supports local reproducibility and persistent local database/model volumes; it is not production deployment guidance.
-- **Deterministic offline evaluation:** fixtures and explicit labels make ACL, freshness, retrieval, and evidence-gate behavior repeatable without LLM judging.
+- **Deterministic offline evaluation:** separate development/held-out reports use explicit labels and deterministic planner mode; no answer generation or LLM judging is used.
 
-No Kafka, Kubernetes, Redis, Elasticsearch/OpenSearch, separate vector database, OCR, document connectors, distributed indexing orchestration, live judge, or generated-answer benchmark is implemented.
+No Kafka, Kubernetes, Redis, Elasticsearch/OpenSearch, separate vector database, OCR, document connectors, external broker/distributed orchestration platform, live judge, or generated-answer benchmark is implemented. Durable database-backed ingestion workers and bounded CHM extraction are implemented.
 
 ## DDD Assessment and Evolution Opportunities
 
@@ -323,7 +347,7 @@ The following code-observed differences are relevant when interpreting `docs/arc
 - The content-hash index is not unique, and the active-version invariant is maintained by transactional repository behavior rather than a database constraint covering arbitrary writes.
 - Trace rows contain no document references, so owner/admin scoping is currently the relevant read policy; document metadata reauthorization is not applicable to a trace with no referenced documents.
 - Compose disables generation by default, while standalone backend configuration defaults the provider to DeepSeek. The overall feature is optional, but the defaults differ by runtime mode.
-- The offline suite and reported metrics concern deterministic retrieval/security/gating, not generated-answer factual correctness or faithfulness.
+- Both backends implement deterministic fallback planning; semantic intent/rewrite depends on the configured LLM planner. Offline evaluation forces deterministic planning and measures retrieval/security/gating, not generated-answer factual correctness or faithfulness.
 
 No change to the approved modular-monolith direction is implied. These are implementation/detail differences and explicit layering limitations, not evidence that the broader security/versioning/evaluation design intent should be weakened.
 

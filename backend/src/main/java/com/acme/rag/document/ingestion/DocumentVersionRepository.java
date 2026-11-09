@@ -2,6 +2,7 @@ package com.acme.rag.document.ingestion;
 
 import com.acme.rag.document.chunking.DocumentChunk;
 import java.sql.Timestamp;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -16,10 +17,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 class DocumentVersionRepository {
     private static final String STATUS_INDEXING = "INDEXING";
     private static final String STATUS_FAILED = "FAILED";
-
     private final JdbcTemplate jdbc;
     private final JdbcClient client;
     private final TransactionTemplate transactions;
+    private final IngestionJobRepository jobs;
     private final String modelId;
     private final int dimensions;
 
@@ -27,11 +28,13 @@ class DocumentVersionRepository {
             JdbcTemplate jdbc,
             JdbcClient client,
             TransactionTemplate transactions,
+            IngestionJobRepository jobs,
             @Value("${app.ingestion.embedding-model-id:nomic-embed-text}") String modelId,
             @Value("${app.ingestion.embedding-dimensions:768}") int dimensions) {
         this.jdbc = jdbc;
         this.client = client;
         this.transactions = transactions;
+        this.jobs = jobs;
         this.modelId = modelId;
         this.dimensions = dimensions;
     }
@@ -39,7 +42,14 @@ class DocumentVersionRepository {
     VersionReservation reserve(ValidatedUpload upload, String contentHash) {
         UUID versionId = UUID.randomUUID();
         UUID jobId = UUID.randomUUID();
-        return transactions.execute(status -> reserveLocked(upload, contentHash, versionId, jobId));
+        return transactions.execute(status -> reserveLocked(upload, contentHash, versionId, jobId, null, null));
+    }
+
+    VersionReservation reserveDurable(ValidatedUpload upload, String contentHash, Path source, long sourceSize) {
+        UUID versionId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        return transactions.execute(status -> reserveLocked(upload, contentHash, versionId, jobId,
+                source.toAbsolutePath().normalize().toString(), sourceSize));
     }
 
     int countChunks(UUID versionId) {
@@ -87,7 +97,7 @@ class DocumentVersionRepository {
             jdbc.update("UPDATE documents SET current_version_id = ?, updated_at = now() WHERE id = ? AND status = 'ACTIVE'",
                     reservation.versionId(), documentId);
             replacePermissions(documentId, roles);
-            jdbc.update("UPDATE ingestion_jobs SET status = 'SUCCEEDED', completed_at = now() WHERE id = ?", reservation.jobId());
+            jobs.markSucceeded(reservation.jobId());
         });
     }
 
@@ -102,27 +112,8 @@ class DocumentVersionRepository {
                 metadata.title(), metadata.department(), metadata.classification(), documentId);
     }
 
-    void fail(String documentId, VersionReservation reservation, RuntimeException failure, boolean seedManaged) {
-        transactions.executeWithoutResult(status -> {
-            String message = failure.getMessage() == null ? "Indexing failed" : failure.getMessage();
-            String safeMessage = message.substring(0, Math.min(message.length(), 500));
-            jdbc.update("UPDATE document_versions SET index_status = 'FAILED' WHERE id = ? AND index_status = 'INDEXING'",
-                    reservation.versionId());
-            jdbc.update("UPDATE ingestion_jobs SET status = 'FAILED', error_message = ?, completed_at = now() WHERE id = ?",
-                    safeMessage, reservation.jobId());
-            boolean retryableProviderFailure = seedManaged && hasTransientProviderCause(failure);
-            if (retryableProviderFailure) {
-                jdbc.update("UPDATE documents SET status = 'DISABLED', seed_repairable = true "
-                        + "WHERE id = ? AND status = 'ACTIVE' AND current_version_id IS NULL "
-                        + "AND seed_managed = true", documentId);
-            } else {
-                jdbc.update("UPDATE documents SET status = 'DISABLED', seed_repairable = false "
-                        + "WHERE id = ? AND status = 'ACTIVE' AND current_version_id IS NULL", documentId);
-            }
-        });
-    }
-
-    private VersionReservation reserveLocked(ValidatedUpload upload, String contentHash, UUID versionId, UUID jobId) {
+    private VersionReservation reserveLocked(ValidatedUpload upload, String contentHash, UUID versionId,
+                                             UUID jobId, String sourcePath, Long sourceSize) {
         lockDocumentKey(upload.documentId());
         Optional<DocumentState> documentState = client.sql(
                         "SELECT status, seed_managed, seed_repairable, current_version_id "
@@ -148,11 +139,17 @@ class DocumentVersionRepository {
             jdbc.update("UPDATE documents SET seed_managed = true, seed_repairable = false WHERE id = ?",
                     upload.documentId());
         }
+        ensureDocumentRoles(upload.documentId(), upload.roles());
+        boolean activeJob = jobs.hasActiveDurableJob(upload.documentId());
+        if (activeJob) {
+            throw new IngestionException(IngestionException.Kind.CONFLICT,
+                    "A document version is currently being indexed; wait for it to finish before retrying");
+        }
         Optional<ExistingVersion> existing = findReusableVersion(upload.documentId(), contentHash);
         if (existing.isPresent()) {
-            return reuseOrRetry(existing.get(), upload, jobId);
+            return reuseOrRetry(existing.get(), upload, jobId, sourcePath, sourceSize);
         }
-        return createVersion(upload, contentHash, versionId, jobId);
+        return createVersion(upload, contentHash, versionId, jobId, sourcePath, sourceSize);
     }
 
     private void lockDocumentKey(String documentId) {
@@ -166,17 +163,6 @@ class DocumentVersionRepository {
                 .param("id", documentId).query(Boolean.class).single());
     }
 
-    private static boolean hasTransientProviderCause(Throwable failure) {
-        Throwable cause = failure;
-        while (cause != null) {
-            if (cause instanceof org.springframework.ai.retry.TransientAiException) {
-                return true;
-            }
-            cause = cause.getCause();
-        }
-        return false;
-    }
-
     private void createDocument(ValidatedUpload upload) {
         jdbc.update("INSERT INTO documents (id, title, department, classification, seed_managed) "
                         + "VALUES (?, ?, ?, ?, ?)",
@@ -185,13 +171,22 @@ class DocumentVersionRepository {
                 "INSERT INTO document_permissions (document_id, allowed_role) VALUES (?, ?)", upload.documentId(), role));
     }
 
+    private void ensureDocumentRoles(String documentId, Set<String> roles) {
+        boolean hasRoles = Boolean.TRUE.equals(client.sql("SELECT EXISTS(SELECT 1 FROM document_permissions WHERE document_id=:id)")
+                .param("id", documentId).query(Boolean.class).single());
+        if (!hasRoles) {
+            roles.forEach(role -> jdbc.update("INSERT INTO document_permissions (document_id, allowed_role) VALUES (?, ?)",
+                    documentId, role));
+        }
+    }
+
     private Optional<ExistingVersion> findReusableVersion(String documentId, String contentHash) {
         return client.sql("""
                 SELECT v.id, v.version_number, v.index_status
                 FROM document_versions v
-                LEFT JOIN documents d ON d.id = v.document_id
+                JOIN documents d ON d.id = v.document_id
                 WHERE v.document_id = :documentId AND v.content_hash = :hash
-                  AND (v.index_status IN ('INDEXING', 'FAILED') OR d.current_version_id = v.id)
+                  AND (v.index_status = 'FAILED' OR d.current_version_id = v.id)
                 ORDER BY v.version_number DESC
                 LIMIT 1
                 """)
@@ -200,15 +195,17 @@ class DocumentVersionRepository {
                         rs.getString("index_status"))).optional();
     }
 
-    private VersionReservation reuseOrRetry(ExistingVersion existing, ValidatedUpload upload, UUID newJobId) {
+    private VersionReservation reuseOrRetry(ExistingVersion existing, ValidatedUpload upload, UUID newJobId,
+                                            String sourcePath, Long sourceSize) {
         if (STATUS_INDEXING.equals(existing.status())) {
             throw new IngestionException(IngestionException.Kind.CONFLICT,
                     "An identical document version is already being indexed");
         }
         if (STATUS_FAILED.equals(existing.status())) {
+            jdbc.update("DELETE FROM document_chunks WHERE document_version_id = ?", existing.versionId());
             jdbc.update("UPDATE document_versions SET index_status = 'INDEXING' WHERE id = ?", existing.versionId());
-            jdbc.update("INSERT INTO ingestion_jobs (id, document_id, document_version_id, status) VALUES (?, ?, ?, 'INDEXING')",
-                    newJobId, upload.documentId(), existing.versionId());
+            jobs.restartFailedVersion(existing.versionId(), newJobId, upload.documentId(), sourcePath,
+                    upload.filename(), sourceSize);
             return new VersionReservation(existing.versionId(), existing.version(), newJobId, false, false, metadata(upload));
         }
         boolean changed = applyMetadataAndPermissions(upload);
@@ -231,7 +228,8 @@ class DocumentVersionRepository {
         return changed;
     }
 
-    private VersionReservation createVersion(ValidatedUpload upload, String contentHash, UUID versionId, UUID jobId) {
+    private VersionReservation createVersion(ValidatedUpload upload, String contentHash, UUID versionId, UUID jobId,
+                                             String sourcePath, Long sourceSize) {
         int nextVersion = client.sql("SELECT COALESCE(MAX(version_number), 0) + 1 FROM document_versions WHERE document_id = :id")
                 .param("id", upload.documentId()).query(Integer.class).single();
         jdbc.update("""
@@ -240,8 +238,7 @@ class DocumentVersionRepository {
                 VALUES (?, ?, ?, ?, ?, ?, 'INDEXING', ?, ?)
                 """, versionId, upload.documentId(), nextVersion, contentHash, upload.filename(),
                 Timestamp.from(upload.effectiveAt()), modelId, dimensions);
-        jdbc.update("INSERT INTO ingestion_jobs (id, document_id, document_version_id, status) VALUES (?, ?, ?, 'INDEXING')",
-                jobId, upload.documentId(), versionId);
+        jobs.createReservedJob(jobId, upload.documentId(), versionId, sourcePath, upload.filename(), sourceSize);
         return new VersionReservation(versionId, nextVersion, jobId, false, false, metadata(upload));
     }
 

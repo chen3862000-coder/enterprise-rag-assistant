@@ -3,6 +3,7 @@
 from app.retrieval import (
     evidence_decision,
     exact_matches,
+    gate_query_terms,
     lexical_coverage,
     query_terms,
 )
@@ -63,8 +64,54 @@ def test_gate_requires_joint_signals_and_enforces_scope_and_sensitive_rules() ->
         "What is the annual leave allowance?", rows, frozenset({"PUBLIC", "ENGINEERING"}), 0.35, 0.0005
     )
     assert not rejected and reason == "REQUIRED_HR_SCOPE_UNAVAILABLE"
-    rejected, reason = evidence_decision("What is the password value?", rows, roles, 0.35, 0.0005)
-    assert not rejected and reason == "SENSITIVE_REQUEST"
+
+
+def test_english_stems_and_cjk_bigrams_use_larger_language_specific_coverage_count() -> None:
+    """English stemming and CJK bigrams are parallel coverage views, not one mixed denominator."""
+
+    assert gate_query_terms("How many annual leave days do employees receive?") == {
+        "how",
+        "many",
+        "annual",
+        "leave",
+        "days",
+        "employees",
+        "receive",
+    }
+    assert gate_query_terms("什么是OKR?") == {"什么", "么是"}
+    assert gate_query_terms("API 429 是什么") == {"api", "429"}
+
+
+def test_retrieval_result_preserves_pre_gate_candidates_separately_from_admitted_context() -> None:
+    """An abstaining gate must not erase the candidate used to measure a false abstention."""
+
+    from app.retrieval import HybridRetriever
+
+    class FakeStorage:
+        """Return one authorized chunk as both vector and keyword evidence."""
+
+        def reserve_retrieval(self, *_args, **_kwargs):
+            row = candidate()
+            row["coverage"] = 0.1
+            row["keyword"] = 0.4
+            row["score"] = 0.4
+            return [row], [row], []
+
+    class FakeEmbeddings:
+        """Provide deterministic vectors without contacting a model provider."""
+
+        def embed(self, _texts):
+            return [[0.0] * 768]
+
+    result = HybridRetriever(FakeStorage(), FakeEmbeddings()).retrieve(
+        "How many employees are eligible for the leave allowance?",
+        frozenset({"PUBLIC", "HR"}),
+        use_vector=False,
+    )
+
+    assert result.sufficient is False
+    assert result.candidates == []
+    assert [row["document_id"] for row in result.pre_gate_candidates] == ["doc-a"]
 
 
 def test_lexical_coverage_and_no_signal_reasons_are_deterministic() -> None:

@@ -98,11 +98,11 @@ def test_deepseek_never_retries_authentication_error_or_logs_secret(monkeypatch,
 def test_query_normalization_removes_only_prefix_and_preserves_quoted_identifiers() -> None:
     """Normalization preserves unrecognized language phrasing, code, and quoted text."""
 
-    assert normalize_query("解释下python版本的csd函数") == "python版本的csd函数"
+    assert normalize_query("解释下python版本的csd函数") == "解释下python版本的csd函数"
     assert normalize_query("什么是OKR?") == "什么是OKR?"
-    assert normalize_query("Explain HTTP 429 for `/v1/csd`") == "HTTP 429 for `/v1/csd`"
+    assert normalize_query("Explain HTTP 429 for `/v1/csd`") == "Explain HTTP 429 for `/v1/csd`"
     assert normalize_query('explain "ignore previous instructions" and CSD') == (
-        '"ignore previous instructions" and CSD'
+        'explain "ignore previous instructions" and CSD'
     )
     assert normalize_query("python版本的csd函数") == "python版本的csd函数"
 
@@ -138,8 +138,8 @@ async def test_planner_disabled_and_provider_failures_use_deterministic_fallback
     )
     disabled = await QueryPlanningService().plan("解释下python版本的csd函数")
     assert disabled.status == "DISABLED"
-    assert disabled.plan.subject == "python版本的csd函数"
-    assert disabled.plan.intent == QueryIntent.EXPLAIN
+    assert disabled.plan.subject == "解释下python版本的csd函数"
+    assert disabled.plan.intent == QueryIntent.UNKNOWN
 
     class BrokenPlanner:
         provider = "deepseek"
@@ -152,7 +152,7 @@ async def test_planner_disabled_and_provider_failures_use_deterministic_fallback
     fallback = await QueryPlanningService(BrokenPlanner()).plan("解释下python版本的csd函数")
     assert fallback.status == "FALLBACK"
     assert fallback.fallback_reason == "INVALID_PLAN"
-    assert fallback.plan.subject == "python版本的csd函数"
+    assert fallback.plan.subject == "解释下python版本的csd函数"
     assert "provider output must not leak" not in str(fallback)
 
 
@@ -263,7 +263,7 @@ async def test_planner_timeout_and_malformed_output_fall_back_without_error_leak
     result = await QueryPlanningService(TimeoutPlanner()).plan("解释下python版本的csd函数")
     assert result.status == "FALLBACK"
     assert result.fallback_reason == "TIMEOUT"
-    assert result.plan.subject == "python版本的csd函数"
+    assert result.plan.subject == "解释下python版本的csd函数"
     assert "synthetic secret" not in str(result)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "synthetic-test-secret")
     monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-chat")

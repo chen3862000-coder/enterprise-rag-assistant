@@ -14,13 +14,13 @@ Enterprise knowledge is fragmented, changes over time, and is subject to documen
 
 ## Solution
 
-The MVP is a Spring Boot modular monolith backed by PostgreSQL/pgvector. Role-scoped vector, PostgreSQL full-text, and exact-identifier SQL paths feed Reciprocal Rank Fusion. A shared evidence gate filters weak candidates before context assembly in chat and offline scoring. Ingestion stages document versions and activates them transactionally. Identical active content updates metadata/ACL without re-embedding, and permission revocation is reflected in subsequent retrieval queries. The React UI exposes citations, document lifecycle metadata, traces, and persisted offline evaluation runs.
+The MVP offers selectable Java/Spring Boot and Python/FastAPI modular backends backed by PostgreSQL/pgvector. Role-scoped vector, English full-text, multilingual lexical-term, and exact-identifier SQL paths feed Reciprocal Rank Fusion. A bounded query-only LLM planner can generate cross-language retrieval formulations; its timeout/invalid-output fallback is deterministic, and the original query remains a baseline. A shared evidence gate filters weak candidates before context assembly in chat and evaluation. Uploads create durable jobs; workers persist staged chunks and activate versions transactionally only after completion. Both implementations support bounded CHM HTML extraction. Identical active content updates metadata/ACL without re-embedding, and permission revocation is reflected in subsequent retrieval queries. The React UI exposes citations, ingestion progress, document lifecycle metadata, traces, and independently persisted development/held-out reports.
 
 ## Demonstration
 
 1. Ask an API policy question and inspect its current source version and trace.
 2. Compare Alice/Bob/Carol role scopes and observe that inaccessible source evidence is unavailable.
-3. Update a document's ACL without changing its content, confirm revocation takes effect immediately, then index a newer policy version and inspect active-version retrieval and offline evaluation results.
+3. Update a document's ACL without changing its content, confirm revocation takes effect immediately, then upload a newer policy version and inspect job progress, atomic activation, and separately reported development/held-out evaluation results.
 
 ## Results
 

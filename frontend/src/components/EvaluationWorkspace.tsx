@@ -25,7 +25,7 @@ export function EvaluationWorkspace() {
     setError('')
     try {
       const result = await api.runEvaluation()
-      setSelected(result)
+      setSelected(result.development)
       await refresh()
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Evaluation run failed') }
     finally { setRunning(false) }
@@ -38,10 +38,11 @@ export function EvaluationWorkspace() {
   }
 
   const metrics = selected?.metrics ?? runs[0]?.metrics
+  const activeDatasetVersion = selected?.datasetVersion ?? runs[0]?.datasetVersion
   return <div className="evaluation-page">
-    <div className="page-heading evaluation-heading"><div><div className="eyebrow dark"><span /> QUALITY &amp; DIAGNOSTICS</div><h1>Measure authorized retrieval.</h1><p className="muted">Deterministic retrieval and evidence-gate diagnostics; not a generated-answer benchmark.</p></div><button className="primary-button" onClick={() => void run()} disabled={running}><Play size={15} /> {running ? 'Running 63 scenarios...' : 'Run offline evaluation'}</button></div>
+    <div className="page-heading evaluation-heading"><div><div className="eyebrow dark"><span /> QUALITY &amp; DIAGNOSTICS</div><h1>Measure authorized retrieval.</h1><p className="muted">Independent development and held-out retrieval diagnostics; not a generated-answer benchmark.</p></div><button className="primary-button" onClick={() => void run()} disabled={running}><Play size={15} /> {running ? 'Running 63 + 40 scenarios...' : 'Run offline evaluation'}</button></div>
     {error && <div className="error-banner">{error}</div>}
-    <div className="evaluation-method-note"><Database size={16} /><span><strong>OFFLINE RETRIEVAL EVALUATION</strong> Uses local embedding and PostgreSQL only. No paid LLM call. Gate decisions are measured by the shared runtime sufficiency policy. Citation ID validation is not factual entailment or answer faithfulness.</span></div>
+    <div className="evaluation-method-note"><Database size={16} /><span><strong>OFFLINE RETRIEVAL EVALUATION</strong> Uses local embeddings and PostgreSQL; answer generation and judging are not called. Query planning is deterministic by default; explicitly enabling the DeepSeek planner can make planner calls, and its mode is recorded per run. Gate decisions use the shared runtime sufficiency policy. Citation ID validation is not factual entailment or answer faithfulness.</span></div>
     <div className="metrics-grid">
       <Metric label="Recall @ 5" value={metrics ? percent(metrics.recallAt5) : '—'} detail="Answerable scenarios" icon={<Activity size={16} />} />
       <Metric label="Mean reciprocal rank" value={metrics ? metrics.meanReciprocalRank.toFixed(3) : '—'} detail="Rank of expected evidence" icon={<Activity size={16} />} />
@@ -52,6 +53,7 @@ export function EvaluationWorkspace() {
       <Metric label="False abstention" value={metrics?.evidenceGateFalseAbstentionRate == null ? '—' : percent(metrics.evidenceGateFalseAbstentionRate)} detail="Expected-answerable retrieved candidates denied" icon={<CircleAlert size={16} />} alert={Boolean(metrics?.evidenceGateFalseAbstentionRate != null && metrics.evidenceGateFalseAbstentionRate > 0.2)} />
       <Metric label="False admission" value={metrics?.evidenceGateFalseAdmissionRate == null ? '—' : percent(metrics.evidenceGateFalseAdmissionRate)} detail="Expected-abstention requests admitted" icon={<ShieldCheck size={16} />} alert={Boolean(metrics?.evidenceGateFalseAdmissionRate != null && metrics.evidenceGateFalseAdmissionRate > 0.05)} />
     </div>
+    {metrics && <p className="metric-footnote">Metrics shown for dataset version {activeDatasetVersion}; development and held-out reports are not pooled.</p>}
     {metrics && Object.keys(metrics.gateAblationMetrics ?? {}).length > 0 && <div className="evaluation-method-note">
       <Activity size={16} /><span><strong>DIAGNOSTIC ABLATIONS</strong> Not applied to chat. {Object.entries(metrics.gateAblationMetrics).map(([policy, score]) => score.falseAbstention !== null && score.falseAdmission !== null
         ? `${policy}: false abstention ${percent(score.falseAbstentionRate ?? 0)}, false admission ${percent(score.falseAdmissionRate ?? 0)} (${score.falseAbstention}/${(score.truePass ?? 0) + (score.falseAbstention ?? 0)}, ${score.falseAdmission}/${(score.falseAdmission ?? 0) + (score.trueAbstention ?? 0)})`
@@ -61,10 +63,10 @@ export function EvaluationWorkspace() {
       <Activity size={16} /><span><strong>NOMIC PREFIX SHADOW</strong> Not used for chat. Paired `search_query:` / `search_document:` cosine retrieval: Recall@5 {percent(metrics.prefixShadowMetrics.recallAt5)}, MRR {metrics.prefixShadowMetrics.meanReciprocalRank.toFixed(3)}, vector-gate accuracy {percent(metrics.prefixShadowMetrics.vectorGateAccuracy)}, false abstentions {metrics.prefixShadowMetrics.falseAbstentionCount}, false admissions {metrics.prefixShadowMetrics.falseAdmissionCount}.</span>
     </div>}
     {selected && <p className="metric-footnote">The active gate must agree with `shouldPassEvidenceGate`. `shouldAbstain` is retained as the customer-facing contract expectation.</p>}
-    {metrics && <p className="metric-footnote">Release quality: {metrics.releaseQualityPassed == null ? 'UNAVAILABLE (historical run)' : metrics.releaseQualityPassed ? 'PASS' : 'FAIL'}; requires zero ACL leakage, at least 10 positive and 10 negative cases, false abstention at most 20%, and false admission at most 5%.</p>}
+    {metrics && <p className="metric-footnote">Release quality: {activeDatasetVersion?.startsWith('heldout-') ? 'NOT APPLICABLE (held-out data is not used for threshold tuning)' : metrics.releaseQualityPassed == null ? 'UNAVAILABLE (historical run)' : metrics.releaseQualityPassed ? 'PASS' : 'FAIL'}; development release criteria require zero ACL leakage, at least 10 positive and 10 negative cases, false abstention at most 20%, and false admission at most 5%.</p>}
     {selected && <p className="metric-footnote">Gate/ACL/freshness contract checks are shown in scenario pass status. Recall and MRR remain separate retrieval measurements; a low retrieval score can fail retrieval without implying an ACL bypass.</p>}
     <div className="evaluation-columns">
-      <section className="runs-card"><div className="section-card-heading"><div><h2>Evaluation runs</h2><p>Persisted measurements from the configured dataset</p></div><button className="icon-button" onClick={() => void refresh()} aria-label="Refresh runs"><RefreshCw size={16} /></button></div>
+      <section className="runs-card"><div className="section-card-heading"><div><h2>Evaluation runs</h2><p>Development and held-out datasets are persisted and scored separately</p></div><button className="icon-button" onClick={() => void refresh()} aria-label="Refresh runs"><RefreshCw size={16} /></button></div>
         {loading ? <div className="loading-state"><LoaderCircle className="spin" /> Loading runs...</div> : runs.length === 0 ? <div className="empty-state">No measured runs yet. Run the offline suite to create the first report.</div> : runs.map(item => <button key={item.runId} className={`run-row ${selected?.runId === item.runId ? 'selected' : ''}`} onClick={() => void open(item.runId)}><span className="run-status"><CheckCircle2 size={17} /></span><span className="run-copy"><strong>{item.datasetVersion}</strong><small>{new Date(item.startedAt).toLocaleString()} · {item.scenarioCount} scenarios · {item.method}</small></span><span className="run-score">R@5 <b>{percent(item.metrics.recallAt5)}</b></span></button>)}
       </section>
       <section className="failures-card">

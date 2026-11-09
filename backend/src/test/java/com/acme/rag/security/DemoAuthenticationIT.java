@@ -123,16 +123,22 @@ class DemoAuthenticationIT {
     void documentAdminCanManageMetadataWithoutGrantingOtherUsersVisibility() throws Exception {
         jdbc.update("INSERT INTO documents (id, title, department, classification) VALUES ('doc-private-hr', 'Private HR Policy', 'HR', 'CONFIDENTIAL')");
         jdbc.update("INSERT INTO document_permissions (document_id, allowed_role) VALUES ('doc-private-hr', 'HR')");
+        jdbc.update("INSERT INTO documents (id, title, department, classification) VALUES ('doc-visible-engineering', 'Visible Engineering Guide', 'ENGINEERING', 'INTERNAL')");
+        jdbc.update("INSERT INTO document_permissions (document_id, allowed_role) VALUES ('doc-visible-engineering', 'ENGINEERING')");
 
         MvcResult alice = login("alice");
         String aliceDocuments = mvc.perform(get("/api/documents").session((org.springframework.mock.web.MockHttpSession) alice.getRequest().getSession(false)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(aliceDocuments).doesNotContain("Private HR Policy");
+        assertThat(aliceDocuments).contains("Visible Engineering Guide");
+        assertThat(aliceDocuments).contains("\"allowedRoles\":[]");
 
         MvcResult carol = login("carol");
         String adminDocuments = mvc.perform(get("/api/documents").session((org.springframework.mock.web.MockHttpSession) carol.getRequest().getSession(false)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(adminDocuments).contains("Private HR Policy");
+        assertThat(adminDocuments).contains("\"allowedRoles\":[\"HR\"]");
+        assertThat(adminDocuments).contains("\"allowedRoles\":[\"ENGINEERING\"]");
     }
 
     @Test
@@ -159,19 +165,24 @@ class DemoAuthenticationIT {
                 .andExpect(status().isForbidden());
 
         MvcResult carol = login("carol");
-        mvc.perform(multipart("/api/documents").file(file).with(csrf())
+        String uploadResponse = mvc.perform(multipart("/api/documents").file(file).with(csrf())
                         .session((org.springframework.mock.web.MockHttpSession) carol.getRequest().getSession(false))
                         .param("documentId", "doc-admin-upload-test")
                         .param("title", "Admin upload test")
                         .param("department", "HR")
                         .param("classification", "CONFIDENTIAL")
                         .param("allowedRoles", "HR"))
-                .andExpect(status().isOk());
+                .andExpect(status().isAccepted())
+                .andReturn().getResponse().getContentAsString();
+        String jobId = new tools.jackson.databind.ObjectMapper().readTree(uploadResponse).get("jobId").asString();
+        MvcResult carolSession = carol;
+        awaitIngestion(jobId, (org.springframework.mock.web.MockHttpSession) carolSession.getRequest().getSession(false));
 
         String carolList = mvc.perform(get("/api/documents")
                         .session((org.springframework.mock.web.MockHttpSession) carol.getRequest().getSession(false)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(carolList).contains("Admin upload test");
+        assertThat(carolList).contains("\"allowedRoles\":[\"HR\"]");
         assertThat(mvc.perform(get("/api/sources/doc-admin-upload-test-v1-c0")
                         .session((org.springframework.mock.web.MockHttpSession) carol.getRequest().getSession(false)))
                 .andReturn().getResponse().getStatus()).isEqualTo(404);
@@ -207,12 +218,21 @@ class DemoAuthenticationIT {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code")
                         .value("INGESTION_INVALID_INPUT"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.message")
-                        .value("Only Markdown, plain text, and PDF files are supported"));
+                        .value("Only Markdown, plain text, PDF, and CHM files are supported"));
     }
 
     private MvcResult login(String username) throws Exception {
         return mvc.perform(post("/api/auth/login").with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"" + username + "\"}"))
                 .andExpect(status().isOk()).andReturn();
+    }
+
+    private void awaitIngestion(String jobId, org.springframework.mock.web.MockHttpSession session) throws Exception {
+        org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(10)).untilAsserted(() -> {
+            String body = mvc.perform(get("/api/ingestions/" + jobId).session(session))
+                    .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            assertThat(new tools.jackson.databind.ObjectMapper().readTree(body).get("status").asString())
+                    .isEqualTo("SUCCEEDED");
+        });
     }
 }

@@ -56,7 +56,7 @@ public class DocumentController {
      * {@code classification}, and comma-separated {@code allowedRoles}.
      */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public IngestionResult upload(
+    public ResponseEntity<IngestionResult> upload(
             @RequestPart("file") MultipartFile file,
             @RequestParam("documentId") String documentId,
             @RequestParam("title") String title,
@@ -64,9 +64,9 @@ public class DocumentController {
             @RequestParam("classification") String classification,
             @RequestParam("allowedRoles") String roleCsv) {
         identity.requireDocumentAdmin();
-        try {
-            return ingestion.ingest(new IngestionRequest(documentId, title, department, classification,
-                    roles(roleCsv), file.getOriginalFilename(), file.getBytes(), Instant.now()));
+        try (var input = file.getInputStream()) {
+            return ResponseEntity.accepted().body(ingestion.enqueue(new IngestionRequest(documentId, title, department,
+                    classification, roles(roleCsv), file.getOriginalFilename(), new byte[0], Instant.now()), input));
         } catch (IOException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unable to read uploaded file", exception);
         }
@@ -77,14 +77,14 @@ public class DocumentController {
      * {@code title}, {@code department}, {@code classification}, and comma-separated {@code allowedRoles}.
      */
     @PostMapping(value = "/{documentId}/reindex", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public IngestionResult reindex(@PathVariable String documentId, @RequestPart("file") MultipartFile file,
+    public ResponseEntity<IngestionResult> reindex(@PathVariable String documentId, @RequestPart("file") MultipartFile file,
                                    @RequestParam("title") String title, @RequestParam("department") String department,
                                    @RequestParam("classification") String classification,
                                    @RequestParam("allowedRoles") String roleCsv) {
         identity.requireDocumentAdmin();
-        try {
-            return ingestion.ingest(new IngestionRequest(documentId, title, department, classification,
-                    roles(roleCsv), file.getOriginalFilename(), file.getBytes(), Instant.now()));
+        try (var input = file.getInputStream()) {
+            return ResponseEntity.accepted().body(ingestion.enqueue(new IngestionRequest(documentId, title, department,
+                    classification, roles(roleCsv), file.getOriginalFilename(), new byte[0], Instant.now()), input));
         } catch (IOException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unable to read uploaded file", exception);
         }
@@ -97,6 +97,12 @@ public class DocumentController {
             return documents.versionsAllForAdmin(documentId);
         }
         return documents.versions(documentId, identity.allowedRoles());
+    }
+
+    /** Lists recent ingestion progress only within the document's current role ACL. */
+    @GetMapping("/{documentId}/ingestions")
+    public List<com.acme.rag.document.ingestion.IngestionJobStatus> ingestions(@PathVariable String documentId) {
+        return ingestion.jobs(documentId, identity.allowedRoles(), identity.isDocumentAdmin());
     }
 
     /** Disables retrieval for a document while retaining its record and version data. */

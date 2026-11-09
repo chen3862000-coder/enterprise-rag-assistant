@@ -12,7 +12,9 @@ import org.springframework.stereotype.Repository;
 public class DocumentManagementRepository {
     private static final String DOCUMENT_LIST_SELECT = """
             SELECT DISTINCT d.id, d.title, d.department, d.classification, d.status,
-                v.version_number, v.index_status, v.created_at
+                v.version_number, v.index_status, v.created_at,
+                CASE WHEN :includeAcl THEN ARRAY(SELECT allowed_role FROM document_permissions permission
+                    WHERE permission.document_id=d.id ORDER BY allowed_role) ELSE ARRAY[]::text[] END AS allowed_roles
             FROM documents d
             LEFT JOIN document_versions v ON v.id = d.current_version_id
             WHERE
@@ -35,20 +37,22 @@ public class DocumentManagementRepository {
     }
 
     public List<DocumentSummary> list(Set<String> roles) {
-        return listWhere("EXISTS (SELECT 1 FROM document_permissions p WHERE p.document_id = d.id AND p.allowed_role IN (:roles))", roles);
+        return listWhere("EXISTS (SELECT 1 FROM document_permissions p WHERE p.document_id = d.id AND p.allowed_role IN (:roles))",
+                roles, false);
     }
 
     public List<DocumentSummary> listAllForAdmin() {
-        return listWhere("TRUE", Set.of("__admin__"));
+        return listWhere("TRUE", Set.of("__admin__"), true);
     }
 
-    private List<DocumentSummary> listWhere(String permissionPredicate, Set<String> roles) {
+    private List<DocumentSummary> listWhere(String permissionPredicate, Set<String> roles, boolean includeAcl) {
         return jdbc.sql(DOCUMENT_LIST_SELECT + permissionPredicate + " ORDER BY d.title, d.id")
-                .param("roles", roles)
+                .param("roles", roles).param("includeAcl", includeAcl)
                 .query((rs, row) -> new DocumentSummary(rs.getString("id"), rs.getString("title"),
                         rs.getString("department"), rs.getString("classification"), rs.getString("status"),
                         (Integer) rs.getObject("version_number"), rs.getString("index_status"),
-                        rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toInstant()))
+                        rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toInstant(),
+                        List.of((String[]) rs.getArray("allowed_roles").getArray())))
                 .list();
     }
 

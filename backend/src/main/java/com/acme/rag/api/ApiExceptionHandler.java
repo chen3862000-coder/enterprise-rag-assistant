@@ -49,7 +49,9 @@ public class ApiExceptionHandler {
             HttpMessageNotReadableException.class, MissingServletRequestParameterException.class,
             MissingServletRequestPartException.class, MaxUploadSizeExceededException.class})
     public ResponseEntity<ApiError> invalidRequest(Exception exception) {
-        return ResponseEntity.badRequest().body(new ApiError("INVALID_REQUEST", safeMessage(exception)));
+        HttpStatus status = exception instanceof MaxUploadSizeExceededException
+                ? HttpStatus.PAYLOAD_TOO_LARGE : HttpStatus.BAD_REQUEST;
+        return ResponseEntity.status(status).body(new ApiError("INVALID_REQUEST", safeMessage(exception)));
     }
 
     private static String safeMessage(Exception exception) {

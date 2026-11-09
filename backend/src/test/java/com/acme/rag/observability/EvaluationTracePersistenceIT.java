@@ -121,6 +121,49 @@ class EvaluationTracePersistenceIT {
                 .singleElement().satisfies(summary -> assertThat(summary.metrics().releaseQualityPassed()).isTrue());
     }
 
+    @Test
+    void developmentAndHeldoutReportsPersistAndReloadAsSeparateRuns() {
+        Instant now = Instant.now();
+        EvaluationScenarioResult developmentScenario = scenario("rag-001");
+        EvaluationScenarioResult heldoutScenario = scenario("heldout-001");
+        EvaluationRunResult development = run("2026-10-p1-v5", developmentScenario, now, true);
+        EvaluationRunResult heldout = run("heldout-paraphrases-v3", heldoutScenario, now, null);
+
+        runs.save(development, "carol", development.retrievalConfiguration());
+        runs.save(heldout, "carol", heldout.retrievalConfiguration());
+
+        assertThat(runs.find(development.runId(), "carol").scenarios())
+                .extracting(EvaluationScenarioResult::scenarioId).containsExactly("rag-001");
+        assertThat(runs.find(heldout.runId(), "carol").scenarios())
+                .extracting(EvaluationScenarioResult::scenarioId).containsExactly("heldout-001");
+        assertThat(runs.recent(10)).filteredOn(summary -> summary.requestedBy().equals("carol"))
+                .extracting(summary -> summary.datasetVersion() + ":" + summary.scenarioCount())
+                .contains("2026-10-p1-v5:1", "heldout-paraphrases-v3:1");
+        assertThat(runs.find(heldout.runId(), "carol").metrics().releaseQualityPassed()).isNull();
+    }
+
+    private static EvaluationRunResult run(String version, EvaluationScenarioResult scenario, Instant now,
+                                           Boolean releaseQualityPassed) {
+        return new EvaluationRunResult(UUID.randomUUID(), version, "OFFLINE_RETRIEVAL", "test-embedding",
+                Map.of("queryPlannerExecutionMode", "DETERMINISTIC_ONLY"), 1,
+                new EvaluationMetrics(1.0, 1.0, 0, 1.0, 1.0, 1.0, 0.0, 0.0, releaseQualityPassed,
+                        Map.of("CURRENT_COVERAGE", new EvaluationMetrics.GateAblationMetrics(1, 0, 0, 0,
+                                1.0, 0.0, 0.0)),
+                        EvaluationMetrics.PrefixShadowMetrics.empty()),
+                "SUCCEEDED", now, now, List.of(scenario));
+    }
+
+    private static EvaluationScenarioResult scenario(String id) {
+        return new EvaluationScenarioResult(id, EvaluationCategory.FACT_LOOKUP,
+                List.of("doc-policy"), List.of("doc-policy"), List.of(), List.of(), 2,
+                Map.of("doc-policy", 2), 1.0, 1.0, true, true, false, true, true, true,
+                "EXACT_IDENTIFIER_MATCH", new EvaluationScenarioResult.GateDiagnostics(1, 0.8, 0.02,
+                0.8, 0.02, true, 1, 1, 1, Map.of("CURRENT_COVERAGE", true), 0.35,
+                0.8, 0.8, false, false, false,
+                new EvaluationScenarioResult.GateDiagnostics.PrefixShadowDiagnostics(
+                        List.of("doc-policy"), 1.0, 1.0, true, 0.8)), true);
+    }
+
     private static RagTrace trace(UUID id, String username) {
         Instant now = Instant.now();
         return new RagTrace(id, username, 10, 20, 30, 4, 3, 1, 5, 2, true, "LEXICAL_AND_RELEVANCE_MATCH",

@@ -149,6 +149,13 @@
                     <include>dataset.jsonl</include>
                 </includes>
             </resource>
+            <resource>
+                <directory>../python-backend/evals</directory>
+                <targetPath>evals</targetPath>
+                <includes>
+                    <include>heldout-paraphrases.jsonl</include>
+                </includes>
+            </resource>
         </resources>
         <plugins>
             <plugin>

@@ -18,14 +18,7 @@ LOGGER = logging.getLogger(__name__)
 MAX_QUERY_VARIANTS = 10
 MAX_PLANNER_RESPONSE_CHARS = 12_000
 
-# Prefix-only normalization avoids rewriting quoted passages, code, identifiers, or paths.
-CONVERSATIONAL_PREFIX = re.compile(
-    r"^\s*(?:(?:please\s+)?(?:help\s+me\s+understand|tell\s+me\s+about|"
-    r"what\s+is|explain|describe|introduce|i\s+want\s+to\s+know)|"
-    r"(?:请问|请|麻烦|帮我理解|我想知道|解释一下|解释下|解释|介绍一下|介绍|告诉我))"
-    r"[\s,，:：、-]*",
-    re.IGNORECASE,
-)
+# Deterministic fallback preserves question wording; only untrusted leading commands are scrubbed.
 INSTRUCTION_PREFIX = re.compile(
     r"^\s*(?:ignore\s+(?:all\s+)?(?:previous|prior)\s+instructions?\b[^;,.!?]*[;,.!?]?\s*|"
     r"(?:set|change|assign)\s+(?:my\s+)?(?:role|permissions?|tenant)\s+to\b[^;,.!?]*[;,.!?]?\s*|"
@@ -33,11 +26,6 @@ INSTRUCTION_PREFIX = re.compile(
     re.IGNORECASE,
 )
 QUOTED_OR_CODE = re.compile(r"(['\"`])(.+?)\1|`{3}.*?`{3}", re.DOTALL)
-QUESTION_ACTION_SUFFIX = re.compile(
-    r"[\s,，:：、-]*(?:是做什么的|是做什么|有什么作用|的用途是什么|作用是什么|做什么的?|"
-    r"what\s+does\s+.{1,80}\s+do|what\s+is\s+.{1,80}\s+for)[\s?？。.!]*$",
-    re.IGNORECASE,
-)
 TECHNICAL_TOKEN = re.compile(
     r"(?<![A-Za-z0-9_])(?:[A-Z][A-Z0-9_]{2,}|[A-Za-z0-9_./:-]*[0-9][A-Za-z0-9_./:-]*|"
     r"[A-Za-z][A-Za-z0-9_]{2,})(?![A-Za-z0-9_])"
@@ -163,7 +151,7 @@ class QueryPlanner(Protocol):
 
 
 def normalize_query(query: str) -> str:
-    """Normalize Unicode and remove only a recognized conversational prefix at query start."""
+    """Normalize Unicode and whitespace without phrase-specific language interpretation."""
 
     value = unicodedata.normalize("NFKC", " ".join(query.strip().split()))
     if not value:
@@ -176,10 +164,6 @@ def normalize_query(query: str) -> str:
 
     masked = QUOTED_OR_CODE.sub(preserve, value)
     masked = INSTRUCTION_PREFIX.sub("", masked)
-    prefix = CONVERSATIONAL_PREFIX.match(masked)
-    if prefix:
-        masked = masked[prefix.end() :].strip()
-    masked = QUESTION_ACTION_SUFFIX.sub("", masked).strip()
     for index, original in enumerate(protected):
         masked = masked.replace(f"__PROTECTED_{index}__", original)
     normalized = " ".join(masked.split())
@@ -193,16 +177,15 @@ class DeterministicQueryPlanner:
     model = "query-normalizer-v1"
 
     async def plan(self, original_query: str, normalized_query: str | None = None) -> QueryPlan:
-        """Produce a safe plan from deterministic prefix normalization only."""
+        """Produce a safe subject-preserving fallback without semantic phrase parsing."""
 
         normalized = normalized_query or normalize_query(original_query)
-        intent = _intent_from_text(original_query)
         language = "zh" if CJK.search(original_query) else "en"
         return QueryPlan(
-            intent=intent,
+            intent=QueryIntent.UNKNOWN,
             subject=normalized[:300] or original_query[:300],
             semantic_query=normalized[:500] or original_query[:500],
-            lexical_queries=[normalized[:300]] if normalized else [],
+            lexical_queries=[],
             language=language,
         )
 
@@ -374,29 +357,6 @@ class OllamaQueryPlanner:
         if not isinstance(content, str) or not content.strip() or len(content) > MAX_PLANNER_RESPONSE_CHARS:
             raise ValueError("Ollama query planner returned invalid output")
         return QueryPlan.model_validate_json(content)
-
-
-def _intent_from_text(query: str) -> QueryIntent:
-    """Classify common request actions deterministically for fallback answer style."""
-
-    value = query.lower()
-    if re.search(r"\b(?:what is|what are|which is|which are)\b", value):
-        return QueryIntent.LOOKUP
-    if re.search(r"\b(compare|versus|vs|difference between)\b|比较|对比|区别", value):
-        return QueryIntent.COMPARE
-    if re.search(r"\b(how do i|how to|steps to|procedure)\b|怎么用|如何|步骤", value):
-        return QueryIntent.PROCEDURE
-    if re.search(r"\b(error|troubleshoot|diagnose|fix)\b|故障|报错|排查", value):
-        return QueryIntent.TROUBLESHOOT
-    if re.search(r"\b(summarize|summary|overview)\b|总结|概述", value):
-        return QueryIntent.SUMMARIZE
-    if re.search(
-        r"\b(explain|describe|introduce|help me understand|what does .{1,100} do)\b"
-        r"|解释|介绍|说明|帮我理解|做什么|用途|有什么作用",
-        value,
-    ) or QUESTION_ACTION_SUFFIX.search(value):
-        return QueryIntent.EXPLAIN
-    return QueryIntent.LOOKUP
 
 
 class QueryPlanningService:

@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 /** Deterministically admits only sufficiently supported candidates and fails closed on intent/scope rejection. */
 @Component
 public final class EvidenceSufficiencyGate {
+    private static final java.util.regex.Pattern CJK_RUN = java.util.regex.Pattern.compile(
+            "[\\u3040-\\u30ff\\u3400-\\u9fff\\uac00-\\ud7af]+");
     public static final double RELAXED_VECTOR_SIMILARITY = 0.25;
     public static final double RELAXED_KEYWORD_SCORE = 0.1;
     public static final double RELEASE_MAX_FALSE_ABSTENTION_RATE = 0.20;
@@ -41,20 +43,26 @@ public final class EvidenceSufficiencyGate {
      */
     public Decision evaluate(String query, List<RankedChunk> chunks, Set<String> expectedDocumentIds,
                              Set<String> authorizedRoles) {
+        return evaluateForPlannedQuery(query, query, chunks, expectedDocumentIds, authorizedRoles);
+    }
+
+    /** Uses planner-derived subject terms for coverage while policy and identifier checks remain bound to the original. */
+    public Decision evaluateForPlannedQuery(String safetyQuery, String coverageQuery, List<RankedChunk> chunks,
+                                            Set<String> expectedDocumentIds, Set<String> authorizedRoles) {
         if (chunks.isEmpty()) {
             return new Decision(false, "NO_AUTHORIZED_CANDIDATES", List.of(),
                     diagnostics(chunks, expectedDocumentIds, List.of(), false,
-                            "NO_AUTHORIZED_CANDIDATES", RetrievalIntentPolicy.containsSensitiveTerm(query), minimumLexicalCoverage(query)));
+                            "NO_AUTHORIZED_CANDIDATES", RetrievalIntentPolicy.containsSensitiveTerm(safetyQuery), minimumLexicalCoverage(coverageQuery)));
         }
-        List<RankedChunk> exactMatches = intentPolicy.exactIdentifierMatches(query, chunks);
-        String policyRejection = intentPolicy.rejection(query, exactMatches, authorizedRoles);
+        List<RankedChunk> exactMatches = intentPolicy.exactIdentifierMatches(safetyQuery, chunks);
+        String policyRejection = intentPolicy.rejection(safetyQuery, exactMatches, authorizedRoles);
         boolean exactAllowed = !exactMatches.isEmpty();
-        boolean sensitiveRequest = RetrievalIntentPolicy.containsSensitiveTerm(query);
+        boolean sensitiveRequest = RetrievalIntentPolicy.containsSensitiveTerm(safetyQuery);
         List<RankedChunk> vectorMatches = chunks.stream()
                 .filter(chunk -> chunk.vectorSimilarity() >= minimumVectorSimilarity).toList();
         List<RankedChunk> keywordMatches = chunks.stream()
                 .filter(chunk -> chunk.keywordScore() >= minimumKeywordScore).toList();
-        double requiredCoverage = minimumLexicalCoverage(query);
+        double requiredCoverage = minimumLexicalCoverage(coverageQuery);
         List<RankedChunk> jointMatches = chunks.stream()
                 .filter(chunk -> chunk.vectorSimilarity() >= minimumVectorSimilarity
                         && chunk.keywordScore() >= minimumKeywordScore
@@ -107,9 +115,27 @@ public final class EvidenceSufficiencyGate {
         return chunks.stream().mapToDouble(value).max().orElse(0.0);
     }
 
-    private static double minimumLexicalCoverage(String query) {
-        int meaningfulTerms = (int) java.util.Arrays.stream(query.toLowerCase(java.util.Locale.ROOT)
-                .split("[^a-z0-9]+", -1)).filter(term -> term.length() > 2).distinct().count();
+    static double minimumLexicalCoverage(String query) {
+        String normalized = java.text.Normalizer.normalize(query, java.text.Normalizer.Form.NFKC)
+                .toLowerCase(java.util.Locale.ROOT);
+        java.util.Set<String> lexicalTerms = new java.util.HashSet<>();
+        java.util.regex.Matcher latin = java.util.regex.Pattern.compile("[a-z0-9]{3,}").matcher(normalized);
+        while (latin.find()) {
+            lexicalTerms.add(latin.group());
+        }
+        var matcher = CJK_RUN.matcher(normalized);
+        java.util.Set<String> bigrams = new java.util.HashSet<>();
+        while (matcher.find()) {
+            String run = matcher.group();
+            if (run.length() == 1) {
+                bigrams.add(run);
+            } else {
+                for (int index = 0; index < run.length() - 1; index++) {
+                    bigrams.add(run.substring(index, index + 2));
+                }
+            }
+        }
+        int meaningfulTerms = Math.max(lexicalTerms.size(), bigrams.size());
         if (meaningfulTerms <= 3) {
             return 0.30;
         }

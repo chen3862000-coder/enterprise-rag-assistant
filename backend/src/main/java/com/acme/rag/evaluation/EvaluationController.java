@@ -26,9 +26,9 @@ public class EvaluationController {
         this.metrics = metrics;
     }
 
-    /** Runs the versioned evaluation dataset without invoking the answer-generation model. */
+    /** Runs and persists independent development and held-out reports without answer generation or judging. */
     @PostMapping("/run")
-    public EvaluationRunResult run() {
+    public EvaluationReports run() {
         identity.requireDocumentAdmin();
         try {
             return evaluations.run(identity.require().username());

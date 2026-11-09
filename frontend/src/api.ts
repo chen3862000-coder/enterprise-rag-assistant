@@ -3,6 +3,7 @@ import type {
   DocumentSummary,
   DocumentVersion,
   EvaluationRun,
+  EvaluationReports,
   EvaluationSummary,
   Identity,
   IngestionResult,
@@ -101,7 +102,7 @@ export const api = {
     return request<EvaluationSummary[]>('/api/evaluations?limit=20')
   },
   async runEvaluation() {
-    return request<EvaluationRun>('/api/evaluations/run', { method: 'POST', headers: await csrfHeader() })
+    return request<EvaluationReports>('/api/evaluations/run', { method: 'POST', headers: await csrfHeader() })
   },
   async evaluation(runId: string) {
     return request<EvaluationRun>(`/api/evaluations/${encodeURIComponent(runId)}`)

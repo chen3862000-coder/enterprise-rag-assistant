@@ -67,6 +67,9 @@ services:
     build:
       context: frontend
       dockerfile: Dockerfile
+      args:
+        VITE_MAX_UPLOAD_MIB: 50
+        VITE_CHM_UPLOAD_ENABLED: "true"
     ports:
       - "${FRONTEND_PORT:-3000}:80"
     depends_on:

@@ -25,7 +25,7 @@ from app.retrieval import (
     HybridRetriever,
     _query_identifiers,
     evidence_decision,
-    query_terms,
+    gate_query_terms,
 )
 from app.retrieval import (
     exact_matches as eligible_exact_matches,
@@ -127,7 +127,7 @@ def evaluate_scenario(scenario: dict[str, Any], retriever: HybridRetriever) -> d
             query,
             identity.roles,
             plan=plan,
-            gate_query=" ".join([plan.subject, *plan.constraints]),
+            gate_query=query,
             planned_queries=_evaluation_query_channels(query, normalized, plan),
         )
     else:
@@ -147,7 +147,7 @@ def evaluate_scenario(scenario: dict[str, Any], retriever: HybridRetriever) -> d
         from app.retrieval import RetrievalResult
 
         result = RetrievalResult(passing, bool(passing), gate_reason, len(vectors), len(keywords), len(exact))
-    candidates = result.candidates
+    candidates = result.pre_gate_candidates if result.pre_gate_candidates is not None else result.candidates
     expected = scenario["expectedDocumentIds"]
     forbidden = scenario["mustNotRetrieveDocumentIds"]
     expected_set = set(expected)
@@ -155,7 +155,7 @@ def evaluate_scenario(scenario: dict[str, Any], retriever: HybridRetriever) -> d
     ranked_set = set(ranked_ids)
     retrieved_versions = {row["document_id"]: row["version_number"] for row in reversed(candidates)}
     should_pass = _expected_gate(scenario)
-    gate_chunks, gate_reason = candidates, result.reason
+    gate_chunks, gate_reason = result.candidates, result.reason
     gate_passed = bool(gate_chunks)
     relevant = bool(expected_set & ranked_set)
     baseline_ids = result.query_diagnostics.get("baselineDocumentIds", []) if result.query_diagnostics else []
@@ -164,7 +164,7 @@ def evaluate_scenario(scenario: dict[str, Any], retriever: HybridRetriever) -> d
     )
     baseline_recall = _recall_at_five(expected, baseline_ids)
     rewrite_recall = _recall_at_five(expected, rewritten_ids)
-    min_coverage = _minimum_coverage(query)
+    min_coverage = _minimum_coverage(_coverage_query(plan))
     diagnostic = _gate_diagnostics(
         query,
         candidates,
@@ -233,14 +233,11 @@ def evaluate_scenario(scenario: dict[str, Any], retriever: HybridRetriever) -> d
 
 
 def _evaluation_plan(query: str, normalized: str | None = None) -> QueryPlan:
-    """Use deterministic plans in release evaluation so LLM availability cannot change labels."""
+    """Use deterministic, language-neutral fallback so provider availability cannot change labels."""
 
     import asyncio
 
-    plan = asyncio.run(QueryPlanningService().plan(query, normalized)).plan
-    if normalized and query == normalized and plan.intent.value == "EXPLAIN":
-        plan = plan.model_copy(update={"intent": "LOOKUP"})
-    return plan
+    return asyncio.run(QueryPlanningService().plan(query, normalized)).plan
 
 
 def _evaluation_query_channels(
@@ -741,10 +738,16 @@ def _retrieval_configuration(retriever: HybridRetriever) -> dict[str, Any]:
 
 
 def _minimum_coverage(query: str) -> float:
-    """Match the deterministic Java/Python adaptive lexical-coverage boundary."""
+    """Match Java's separate English-stem and CJK-bigram term-count boundaries."""
 
-    count = len(query_terms(query))
+    count = len(gate_query_terms(query))
     return 0.30 if count <= 3 else 0.35 if count <= 6 else 0.40
+
+
+def _coverage_query(plan: QueryPlan) -> str:
+    """Use planned subject coverage while preserving the original query for policy checks."""
+
+    return " ".join([plan.subject, *plan.constraints])
 
 
 def _joint(row: dict[str, Any], vector_minimum: float, keyword_minimum: float, coverage: float) -> bool:

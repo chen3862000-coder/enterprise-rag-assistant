@@ -5,10 +5,11 @@ COPY backend/.mvn ./backend/.mvn
 RUN chmod +x backend/mvnw && cd backend && ./mvnw -B -DskipTests dependency:go-offline
 COPY backend/src ./backend/src
 COPY evals ./evals
+COPY python-backend/evals ./python-backend/evals
 RUN cd backend && ./mvnw -B -DskipTests package
 
 FROM eclipse-temurin:21-jre-jammy
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+RUN apt-get update && apt-get install -y --no-install-recommends curl 7zip \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/backend/target/enterprise-rag-assistant-0.1.0-SNAPSHOT.jar /app/app.jar

@@ -173,3 +173,8 @@ export type EvaluationRun = EvaluationSummary & {
     passed: boolean
   }>
 }
+
+export type EvaluationReports = {
+  development: EvaluationRun
+  heldout: EvaluationRun
+}

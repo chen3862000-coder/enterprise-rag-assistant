@@ -11,6 +11,7 @@ const FILE_TYPES = CHM_UPLOAD_ENABLED
 const SUPPORTED_FORMATS = CHM_UPLOAD_ENABLED
   ? 'Markdown, text, extractable PDF, or CHM'
   : 'Markdown, text, or extractable PDF'
+const DOCUMENT_ROLES = ['PUBLIC', 'ENGINEERING', 'HR', 'SECURITY_ADMIN'] as const
 
 export function KnowledgeWorkspace({ identity }: { identity: Identity }) {
   const [documents, setDocuments] = useState<DocumentSummary[]>([])
@@ -136,6 +137,14 @@ export function KnowledgeWorkspace({ identity }: { identity: Identity }) {
       setError('Logical document ID must start with a letter or number and use only letters, numbers, dot, underscore, or hyphen.')
       return
     }
+    const allowedRoles = selectedAllowedRoles(data)
+    if (allowedRoles.length === 0) {
+      setError('Select at least one role that may access this document.')
+      return
+    }
+    data.delete('allowedRoles')
+    data.delete('allowedRole')
+    data.append('allowedRoles', allowedRoles.join(','))
     const file = data.get('file')
     if (typeof file === 'string' || !file || typeof file.size !== 'number' || file.size === 0) {
       setError(`Choose a non-empty ${SUPPORTED_FORMATS} file.`)
@@ -174,7 +183,7 @@ export function KnowledgeWorkspace({ identity }: { identity: Identity }) {
         <div className="list-toolbar"><div><strong>Indexed documents</strong><span>{documents.length} visible to your identity</span></div><button className="icon-button" onClick={() => void refresh()} aria-label="Refresh list"><RefreshCw size={16} /></button></div>
         <div className="document-table-head"><span>DOCUMENT</span><span>CLASSIFICATION</span><span>VERSION</span><span>STATUS</span><span /></div>
       {loading ? <div className="loading-state"><LoaderCircle className="spin" /> Loading index...</div> : documents.length === 0 ? <div className="empty-state">No accessible documents are indexed yet.</div> : documents.map(document => <div key={document.id} className={`document-row ${selected?.id === document.id ? 'selected' : ''}`}>
-          <button className="document-row-main" onClick={() => void selectDocument(document)}><span className="file-icon"><FileText size={17} /></span><span className="document-name"><strong>{document.title}</strong><small>{document.id}</small></span><span className={`classification ${document.classification.toLowerCase()}`}>{document.classification}</span><span className="version-pill">{document.currentVersion ? `v${document.currentVersion}` : '—'}</span><span className={`status-pill ${document.currentVersion === null && document.status === 'ACTIVE' && document.indexStatus === 'FAILED' ? 'ready' : document.status.toLowerCase()}`}>{document.ingestionJobStatus === 'INDEXING' ? `INDEXING · ${document.progressChunks ?? 0} chunks` : documentStatusLabel(document)}</span><ChevronDown className="row-chevron" size={15} /></button>
+          <button className="document-row-main" onClick={() => void selectDocument(document)}><span className="file-icon"><FileText size={17} /></span><span className="document-name"><strong>{document.title}</strong><small>{document.id}</small>{identity.documentAdmin && <small className="document-acl">ALLOWED ROLES · {document.allowedRoles?.length ? document.allowedRoles.join(', ') : '—'}</small>}</span><span className={`classification ${document.classification.toLowerCase()}`}>{document.classification}</span><span className="version-pill">{document.currentVersion ? `v${document.currentVersion}` : '—'}</span><span className={`status-pill ${document.currentVersion === null && document.status === 'ACTIVE' && document.indexStatus === 'FAILED' ? 'ready' : document.status.toLowerCase()}`}>{document.ingestionJobStatus === 'INDEXING' ? `INDEXING · ${document.progressChunks ?? 0} chunks` : documentStatusLabel(document)}</span><ChevronDown className="row-chevron" size={15} /></button>
           {selected?.id === document.id && <div className="version-expansion"><div className="version-heading">VERSION HISTORY <span>{versions.length} versions</span></div>{versions.map(version => <div key={version.id} className="version-row"><span className="version-tag">v{version.version}</span><span className="version-source">{version.sourceFilename}<small>{version.embeddingModelId} · {version.embeddingDimensions}d</small></span><span className={version.active ? 'active-version' : 'inactive-version'}>{version.active ? 'ACTIVE' : version.indexStatus}</span><small>{new Date(version.createdAt).toLocaleDateString()}</small></div>)}</div>}
         </div>)}
       </section>
@@ -186,7 +195,7 @@ export function KnowledgeWorkspace({ identity }: { identity: Identity }) {
      {showUpload && <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) { setShowUpload(false); setRetryDocument(null) } }}><section className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title"><div className="modal-heading"><div><span className="eyebrow dark">INDEX A SOURCE</span><h2 id="upload-title">{retryDocument ? 'Retry document indexing' : 'Add or update knowledge'}</h2></div><button className="icon-button" onClick={() => { setShowUpload(false); setRetryDocument(null) }} aria-label="Close"><X size={18} /></button></div>
         {activeIngestion?.status === 'INDEXING' && <div className="ingestion-progress" role="status"><LoaderCircle size={16} className="spin" /><div><strong>Indexing {activeIngestion.documentTitle}</strong><p>{ingestionProgressLabel(activeIngestion.progressChunks)}</p></div></div>}
         {retryDocument && <p className="field-note">Select the source file again. The existing document ID and allowed roles are preserved. It remains unavailable to retrieval until indexing succeeds.</p>}
-        <form onSubmit={upload} className="upload-form"><label>Logical document ID <input name="documentId" defaultValue={retryDocument?.id ?? ''} readOnly={Boolean(retryDocument)} placeholder="doc-engineering-api-guide" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,159}" required /></label><p className="field-note">Use a new stable ID for a new document; reuse its existing ID to create a new version. Identical content updates metadata/ACL without re-embedding.</p><label>Document title <input name="title" defaultValue={retryDocument?.title ?? ''} required maxLength={180} /></label><div className="form-two"><label>Department <select name="department" defaultValue={retryDocument?.department ?? 'PUBLIC'}><option>PUBLIC</option><option>ENGINEERING</option><option>HR</option><option>SECURITY</option></select></label><label>Classification <select name="classification" defaultValue={retryDocument?.classification ?? 'PUBLIC'}><option>PUBLIC</option><option>INTERNAL</option><option>CONFIDENTIAL</option><option>RESTRICTED</option></select></label></div><label>Allowed roles <input name="allowedRoles" defaultValue={retryDocument?.allowedRoles?.join(',') ?? 'ENGINEERING'} placeholder="ENGINEERING,HR" required /></label><label className="file-drop"><UploadCloud size={22} /><strong>Choose {SUPPORTED_FORMATS}</strong><small>Maximum {MAX_UPLOAD_MIB} MiB · Scanned PDFs are unsupported</small><input name="file" type="file" accept={FILE_TYPES} required /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setShowUpload(false); setRetryDocument(null) }}>Cancel</button><button type="submit" className="primary-button" disabled={uploading || activeIngestion?.status === 'INDEXING'}>{uploading ? <LoaderCircle size={15} className="spin" /> : <UploadCloud size={15} />} {uploading ? 'Submitting...' : retryDocument ? 'Retry indexing' : 'Upload & index'}</button></div></form>
+        <form onSubmit={upload} className="upload-form"><label>Logical document ID <input name="documentId" defaultValue={retryDocument?.id ?? ''} readOnly={Boolean(retryDocument)} placeholder="doc-engineering-api-guide" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,159}" required /></label><p className="field-note">Use a new stable ID for a new document; reuse its existing ID to create a new version. Identical content updates metadata/ACL without re-embedding.</p><label>Document title <input name="title" defaultValue={retryDocument?.title ?? ''} required maxLength={180} /></label><div className="form-two"><label>Department <select name="department" defaultValue={retryDocument?.department ?? 'PUBLIC'}><option>PUBLIC</option><option>ENGINEERING</option><option>HR</option><option>SECURITY</option></select></label><label>Classification <select name="classification" defaultValue={retryDocument?.classification ?? 'PUBLIC'}><option>PUBLIC</option><option>INTERNAL</option><option>CONFIDENTIAL</option><option>RESTRICTED</option></select></label></div><fieldset className="role-selector"><legend>Allowed roles</legend><p className="field-note">Select who may retrieve this document. Classification labels do not grant access.</p><div>{DOCUMENT_ROLES.map(role => <label key={role}><input type="checkbox" name="allowedRole" value={role} defaultChecked={retryDocument?.allowedRoles?.includes(role) ?? false} /> {role}</label>)}</div></fieldset><label className="file-drop"><UploadCloud size={22} /><strong>Choose {SUPPORTED_FORMATS}</strong><small>Maximum {MAX_UPLOAD_MIB} MiB · Scanned PDFs are unsupported</small><input name="file" type="file" accept={FILE_TYPES} required /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setShowUpload(false); setRetryDocument(null) }}>Cancel</button><button type="submit" className="primary-button" disabled={uploading || activeIngestion?.status === 'INDEXING'}>{uploading ? <LoaderCircle size={15} className="spin" /> : <UploadCloud size={15} />} {uploading ? 'Submitting...' : retryDocument ? 'Retry indexing' : 'Upload & index'}</button></div></form>
     </section></div>}
   </div>
 }
@@ -204,6 +213,17 @@ export function canRetryFirstUpload(document: DocumentSummary) {
 
 export function ingestionProgressLabel(chunks: number) {
   return `${chunks} chunks completed. You can close this dialog; the backend continues processing.`
+}
+
+export function selectedAllowedRoles(data: FormData) {
+  return [
+    ...new Set(
+      [...data.getAll('allowedRole'), ...data.getAll('allowedRoles')]
+        .flatMap(role => String(role).split(','))
+        .map(role => role.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ]
 }
 
 export function uploadErrorMessage(cause: unknown) {

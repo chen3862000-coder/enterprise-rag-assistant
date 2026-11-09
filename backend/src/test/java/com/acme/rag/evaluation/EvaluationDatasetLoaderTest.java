@@ -31,4 +31,23 @@ class EvaluationDatasetLoaderTest {
         assertThat(dataset.scenarios()).allSatisfy(scenario ->
                 assertThat(scenario.shouldPassEvidenceGate()).isNotNull());
     }
+
+    @Test
+    void loadsSeparateVersionedHeldoutSetWithFortyDisjointIds() {
+        EvaluationDatasetLoader loader = new EvaluationDatasetLoader(new ObjectMapper());
+        EvaluationDataset development = loader.load();
+        EvaluationDataset heldout = loader.loadHeldout();
+
+        assertThat(heldout.version()).isEqualTo("heldout-paraphrases-v3");
+        assertThat(heldout.scenarios()).hasSize(40).extracting(EvaluationScenario::id).doesNotHaveDuplicates();
+        assertThat(heldout.scenarios()).extracting(EvaluationScenario::id)
+                .doesNotContainAnyElementsOf(development.scenarios().stream().map(EvaluationScenario::id).toList());
+        assertThat(heldout.scenarios()).filteredOn(scenario -> scenario.category() == EvaluationCategory.FACT_LOOKUP).hasSize(19);
+        assertThat(heldout.scenarios()).filteredOn(scenario -> scenario.category() == EvaluationCategory.MULTI_DOCUMENT_QA).hasSize(2);
+        assertThat(heldout.scenarios()).filteredOn(scenario -> scenario.category() == EvaluationCategory.KEYWORD_EXACT_MATCH).hasSize(3);
+        assertThat(heldout.scenarios()).filteredOn(scenario -> scenario.category() == EvaluationCategory.PERMISSION_ISOLATION).hasSize(2);
+        assertThat(heldout.scenarios()).filteredOn(scenario -> scenario.category() == EvaluationCategory.UNANSWERABLE).hasSize(2);
+        assertThat(heldout.scenarios()).filteredOn(scenario -> scenario.category() == EvaluationCategory.DOCUMENT_FRESHNESS).hasSize(2);
+        assertThat(heldout.scenarios()).filteredOn(scenario -> scenario.category() == EvaluationCategory.HARD_NEGATIVE).hasSize(10);
+    }
 }

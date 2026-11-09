@@ -7,6 +7,7 @@ import java.util.stream.Collectors;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
+import java.nio.file.Path;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -22,9 +23,15 @@ final class UploadValidator {
     }
 
     ValidatedUpload validate(IngestionRequest request) {
+        ValidatedUpload metadata = validateMetadata(request);
+        byte[] content = contentValidator.validate(metadata.filename(), request.content());
+        return new ValidatedUpload(metadata.documentId(), metadata.title(), metadata.department(), metadata.classification(),
+                metadata.roles(), metadata.filename(), content, metadata.effectiveAt(), metadata.seedManaged());
+    }
+
+    ValidatedUpload validateMetadata(IngestionRequest request) {
         validateDocumentId(request);
         String filename = safeFilename(request.filename());
-        byte[] content = contentValidator.validate(filename, request.content());
         String title = required(request.title(), "title");
         String department = required(request.department(), "department");
         String classification = required(request.classification(), "classification").toUpperCase(Locale.ROOT);
@@ -33,7 +40,11 @@ final class UploadValidator {
                 .collect(Collectors.toUnmodifiableSet());
         validateRoles(roles);
         return new ValidatedUpload(request.documentId().strip(), title, department, classification, roles, filename,
-                content, request.effectiveAt() == null ? Instant.now() : request.effectiveAt(), request.seedManaged());
+                new byte[0], request.effectiveAt() == null ? Instant.now() : request.effectiveAt(), request.seedManaged());
+    }
+
+    void validateFile(String filename, Path source) {
+        contentValidator.validateFile(filename, source);
     }
 
     private static void validateDocumentId(IngestionRequest request) {

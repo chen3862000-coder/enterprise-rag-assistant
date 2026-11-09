@@ -1,10 +1,12 @@
 # Python Backend Parity Plan
 
+> Historical planning document. Its original goal was to leave Java unchanged; subsequent parity work has extended Java with durable ingestion, CHM extraction, multilingual indexing/retrieval, bounded query planning, and separate held-out evaluation. The original baseline and delivery phases below are retained as history, not current-state claims. See `docs/backend-parity.md` for current implementation and verification status.
+
 ## Purpose
 
-Add a separately runnable Python implementation of the current Enterprise RAG Assistant backend while retaining the Java 21/Spring Boot implementation unchanged except for verified, shared fixes. The React frontend should use either backend through the existing same-origin API contract. The goal is to demonstrate that the current secure RAG architecture can be implemented in a second language, not to replace it with a basic upload-and-chat service.
+Original goal: add a separately runnable Python implementation of the then-current Enterprise RAG Assistant backend while keeping Java unchanged except for shared fixes. That constraint has since been superseded by explicit Java parity enhancements. The React frontend uses either backend through the same-origin API contract.
 
-This document records the agreed design and delivery plan. It does not claim that Python behavior, API compatibility, evaluation thresholds, or runtime workflows have been implemented or verified.
+This document records the original design and delivery plan. It is not a current implementation-status report and does not replace code/test verification.
 
 ## Repository Baseline
 

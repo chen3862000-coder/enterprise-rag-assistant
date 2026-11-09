@@ -13,6 +13,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 @Component
 public class SyntheticSeedRunner implements ApplicationRunner {
@@ -21,6 +22,7 @@ public class SyntheticSeedRunner implements ApplicationRunner {
     private final boolean enabled;
     private final Path root;
 
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Injected Spring service collaborator is private and not exposed")
     public SyntheticSeedRunner(
             DocumentIngestionService ingestionService,
             @Value("${app.seed.enabled:false}") boolean enabled,

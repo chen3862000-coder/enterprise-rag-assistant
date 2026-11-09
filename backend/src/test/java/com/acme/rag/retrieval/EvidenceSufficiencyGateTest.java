@@ -82,6 +82,14 @@ class EvidenceSufficiencyGateTest {
     }
 
     @Test
+    void englishStemsAndCjkBigramsUseTheLargerParallelCoverageCount() {
+        assertThat(EvidenceSufficiencyGate.minimumLexicalCoverage(
+                "How many annual leave days do employees receive?")).isEqualTo(0.40);
+        assertThat(EvidenceSufficiencyGate.minimumLexicalCoverage("什么是OKR?")).isEqualTo(0.30);
+        assertThat(EvidenceSufficiencyGate.minimumLexicalCoverage("API 429 是什么")).isEqualTo(0.30);
+    }
+
+    @Test
     void policyGuardsFailClosedForFutureContractorAndCrossDepartmentRequests() {
         RankedChunk candidate = new RankedChunk("leave", UUID.randomUUID(), "doc-hr-leave-policy", "Leave", 1,
                 "Policy", "Employees get 20 days of annual leave per calendar year.", 0.02,
@@ -147,6 +155,19 @@ class EvidenceSufficiencyGateTest {
     }
 
     @Test
+    void exactHeaderDoesNotBypassChineseSensitiveValueRequest() {
+        RankedChunk header = new RankedChunk("header", UUID.randomUUID(), "doc-engineering-api-architecture",
+                "API Architecture", 1, "Headers", "X-Request-Id identifies the request.", 0.01,
+                0.8, 0.8, true, 1.0);
+
+        EvidenceSufficiencyGate.Decision decision = gate.evaluate(
+                "X-Request-Id 对应的密码是什么？", List.of(header), Set.of(), Set.of("ENGINEERING"));
+
+        assertThat(decision.sufficient()).isFalse();
+        assertThat(decision.reason()).isEqualTo("SENSITIVE_REQUEST");
+    }
+
+    @Test
     void validMultiIdentifierQuestionIsNotRejectedAsAnUnmatchedSingleIdentifier() {
         RankedChunk exact = new RankedChunk("gateway", UUID.randomUUID(), "doc-engineering-api-architecture",
                 "API Architecture", 1, "Routing", "The gateway routes /v1 requests to Workspace.",
@@ -180,6 +201,56 @@ class EvidenceSufficiencyGateTest {
         assertThat(decision.sufficient()).isTrue();
         assertThat(decision.reason()).isEqualTo("EXACT_IDENTIFIER_MATCH");
         assertThat(decision.chunks()).containsExactly(terminalIdentifier);
+    }
+
+    @Test
+    void mixedLanguageExactIdentifierIgnoresUnindexedOrdinaryWords() {
+        RankedChunk code = new RankedChunk("gateway", UUID.randomUUID(), "doc-engineering-error-codes", "Errors", 1,
+                "GW-204", "GW-204 错误代码 means what?", 0.01, 0.2, 0.0, true, 0.0);
+
+        EvidenceSufficiencyGate.Decision decision = gate.evaluate(
+                "GW-204 错误代码 means what?", List.of(code), Set.of(), Set.of("ENGINEERING"));
+
+        assertThat(decision.sufficient()).isTrue();
+        assertThat(decision.reason()).isEqualTo("EXACT_IDENTIFIER_MATCH");
+    }
+
+    @Test
+    void namedChineseErrorCodeDoesNotTriggerUnmatchedIdentifierAbstention() {
+        RankedChunk code = new RankedChunk("gateway", UUID.randomUUID(), "doc-engineering-error-codes", "Errors", 1,
+                "GW-204", "GW-204 错误代码 means what?", 0.01, 0.2, 0.0, true, 0.0);
+
+        EvidenceSufficiencyGate.Decision decision = gate.evaluate(
+                "GW-204 错误代码 means what?", List.of(code), Set.of(), Set.of("ENGINEERING"));
+
+        assertThat(decision.sufficient()).isTrue();
+        assertThat(decision.reason()).isEqualTo("EXACT_IDENTIFIER_MATCH");
+    }
+
+    @Test
+    void asciiErrorCodeAdjacentToChineseQuestionTextMatchesTheIndexedToken() {
+        RankedChunk code = new RankedChunk("gateway", UUID.randomUUID(), "doc-engineering-error-codes", "Errors", 1,
+                "GW-204", "`GW-204` indicates the gateway could not reach an upstream service.",
+                0.01, 0.2, 0.0, true, 0.0);
+
+        EvidenceSufficiencyGate.Decision decision = gate.evaluate(
+                "GW-204 错误代码 means what?", List.of(code), Set.of(), Set.of("ENGINEERING"));
+
+        assertThat(decision.sufficient()).isTrue();
+        assertThat(decision.reason()).isEqualTo("EXACT_IDENTIFIER_MATCH");
+    }
+
+    @Test
+    void matchedIndexedIdentifierCanPassWhenAnotherMentionedIdentifierIsNotIndexed() {
+        RankedChunk header = new RankedChunk("header", UUID.randomUUID(), "doc-engineering-api-architecture",
+                "API Architecture", 1, "Headers", "X-Request-Id identifies the request.", 0.01,
+                0.2, 0.0, true, 0.0);
+
+        EvidenceSufficiencyGate.Decision decision = gate.evaluate(
+                "What does X-Request-Id mean?", List.of(header), Set.of(), Set.of("ENGINEERING"));
+
+        assertThat(decision.sufficient()).isTrue();
+        assertThat(decision.reason()).isEqualTo("EXACT_IDENTIFIER_MATCH");
     }
 
     @Test

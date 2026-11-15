@@ -14,12 +14,20 @@ public record RetrievalCandidate(
         boolean vectorMatch,
         boolean keywordMatch,
         boolean exactMatch,
-        double lexicalCoverage) {
+        double lexicalCoverage,
+        String matchedIdentifier) {
+    public RetrievalCandidate(String chunkId, UUID versionId, String documentId, String title, int version,
+                              String section, String text, double score, boolean vectorMatch,
+                              boolean keywordMatch, boolean exactMatch, double lexicalCoverage) {
+        this(chunkId, versionId, documentId, title, version, section, text, score, vectorMatch,
+                keywordMatch, exactMatch, lexicalCoverage, null);
+    }
+
     public RetrievalCandidate(String chunkId, UUID versionId, String documentId, String title, int version,
                               String section, String text, double score, boolean vectorMatch,
                               boolean keywordMatch, boolean exactMatch) {
         this(chunkId, versionId, documentId, title, version, section, text, score, vectorMatch,
-                keywordMatch, exactMatch, keywordMatch ? 1.0 : 0.0);
+                keywordMatch, exactMatch, keywordMatch ? 1.0 : 0.0, null);
     }
 
     public RetrievalCandidate(String chunkId, UUID versionId, String documentId, String title, int version,

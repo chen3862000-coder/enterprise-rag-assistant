@@ -88,13 +88,11 @@ final class RetrievalIntentPolicy {
             addAllowedIdentifier(query, identifiers, matcher.group());
         }
         if (CJK_RUN.matcher(normalized).find()) {
+            // Mixed-script questions attach lowercase API names directly to CJK text (for example "css函数").
+            // Those ASCII runs must remain eligible for exact indexed evidence, matching the Python backend.
             Matcher ascii = ASCII_TECHNICAL_TOKEN.matcher(CJK_RUN.matcher(normalized).replaceAll(" "));
             while (ascii.find()) {
-                String token = ascii.group();
-                if (token.matches("[A-Z][A-Z0-9_]{2,}")
-                        || token.matches("(?i)X-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+") || token.matches(".*[0-9].*")) {
-                    addAllowedIdentifier(query, identifiers, token);
-                }
+                addAllowedIdentifier(query, identifiers, ascii.group());
             }
         }
         addPatternMatches(API_SYMBOL, normalized, identifiers);
@@ -110,10 +108,39 @@ final class RetrievalIntentPolicy {
     }
 
     private static Set<String> indexedMatches(List<RankedChunk> chunks, Set<String> identifiers) {
-        return chunks.stream().filter(RankedChunk::exactMatch)
-                .map(chunk -> chunk.text().toLowerCase(Locale.ROOT))
-                .flatMap(text -> identifiers.stream().filter(identifier -> containsExactIdentifier(text, identifier)))
-                .collect(java.util.stream.Collectors.toSet());
+        Set<String> matches = new HashSet<>();
+        for (RankedChunk chunk : chunks) {
+            if (chunk.exactMatch()) {
+                addChunkMatches(chunk, identifiers, matches);
+            }
+        }
+        return matches;
+    }
+
+    private static void addChunkMatches(RankedChunk chunk, Set<String> identifiers, Set<String> matches) {
+        String indexed = chunk.matchedIdentifier();
+        if (indexed != null && !indexed.isBlank()) {
+            addIndexedIdentifier(chunk, indexed.toLowerCase(Locale.ROOT), identifiers, matches);
+            return;
+        }
+        for (String identifier : identifiers) {
+            if (isStrongIdentifier(identifier) && containsExactIdentifier(chunk.text(), identifier)) {
+                matches.add(identifier);
+            }
+        }
+    }
+
+    private static void addIndexedIdentifier(RankedChunk chunk, String identifier, Set<String> identifiers,
+                                             Set<String> matches) {
+        if (identifiers.contains(identifier) && containsExactIdentifier(chunk.text(), identifier)) {
+            matches.add(identifier);
+        }
+    }
+
+    private static boolean isStrongIdentifier(String identifier) {
+        return identifier.matches("[A-Z][A-Z0-9_]{2,}")
+                || identifier.matches("(?i)X-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+")
+                || identifier.matches(".*[0-9].*");
     }
 
     private static List<RankedChunk> exactChunks(List<RankedChunk> chunks, String identifier) {

@@ -29,14 +29,7 @@ public final class ReciprocalRankFusion {
             for (int index = 0; index < ranking.size(); index++) {
                 RetrievalCandidate candidate = ranking.get(index);
                 Accumulator accumulator = fused.computeIfAbsent(candidate.chunkId(), ignored -> new Accumulator(candidate));
-                accumulator.score += 1.0 / (constant + index + 1);
-                accumulator.vectorSimilarity = Math.max(accumulator.vectorSimilarity,
-                        candidate.vectorMatch() ? candidate.score() : 0.0);
-                accumulator.keywordScore = Math.max(accumulator.keywordScore,
-                        candidate.keywordMatch() ? candidate.score() : 0.0);
-                accumulator.lexicalCoverage = Math.max(accumulator.lexicalCoverage,
-                        candidate.keywordMatch() ? candidate.lexicalCoverage() : 0.0);
-                accumulator.exactMatch |= candidate.exactMatch();
+                accumulate(accumulator, candidate, index);
             }
         }
         List<RankedChunk> results = new ArrayList<>();
@@ -48,11 +41,26 @@ public final class ReciprocalRankFusion {
         return List.copyOf(results);
     }
 
+    private void accumulate(Accumulator accumulator, RetrievalCandidate candidate, int index) {
+        accumulator.score += 1.0 / (constant + index + 1);
+        accumulator.vectorSimilarity = Math.max(accumulator.vectorSimilarity,
+                candidate.vectorMatch() ? candidate.score() : 0.0);
+        accumulator.keywordScore = Math.max(accumulator.keywordScore,
+                candidate.keywordMatch() ? candidate.score() : 0.0);
+        accumulator.lexicalCoverage = Math.max(accumulator.lexicalCoverage,
+                candidate.keywordMatch() ? candidate.lexicalCoverage() : 0.0);
+        accumulator.exactMatch |= candidate.exactMatch();
+        if (candidate.matchedIdentifier() != null && !candidate.matchedIdentifier().isBlank()) {
+            accumulator.matchedIdentifier = candidate.matchedIdentifier();
+        }
+    }
+
     private static RankedChunk toRanked(Accumulator value) {
         RetrievalCandidate candidate = value.candidate;
         return new RankedChunk(candidate.chunkId(), candidate.versionId(), candidate.documentId(), candidate.title(),
                 candidate.version(), candidate.section(), candidate.text(), value.score,
-                value.vectorSimilarity, value.keywordScore, value.exactMatch, value.lexicalCoverage);
+                value.vectorSimilarity, value.keywordScore, value.exactMatch, value.lexicalCoverage,
+                value.matchedIdentifier);
     }
 
     private static final class Accumulator {
@@ -62,6 +70,7 @@ public final class ReciprocalRankFusion {
         private double keywordScore;
         private double lexicalCoverage;
         private boolean exactMatch;
+        private String matchedIdentifier;
 
         private Accumulator(RetrievalCandidate candidate) {
             this.candidate = candidate;

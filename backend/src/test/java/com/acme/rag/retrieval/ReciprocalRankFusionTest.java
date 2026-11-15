@@ -87,6 +87,17 @@ class ReciprocalRankFusionTest {
         assertThat(decision.reason()).isEqualTo("MULTI_IDENTIFIER_COMPARISON");
     }
 
+    @Test
+    void fusionPreservesMatchedExactIdentifierForTheEvidenceGate() {
+        RetrievalCandidate exact = new RetrievalCandidate("css", UUID.randomUUID(), "doc-manual", "Manual", 1,
+                "EM_CSS", "截面函数：css （需授权）", 1.0, false, false, true, 0.0, "css");
+
+        List<RankedChunk> result = new ReciprocalRankFusion(60, 5)
+                .fuse(List.of(List.of(), List.of(), List.of(exact)));
+
+        assertThat(result).singleElement().extracting(RankedChunk::matchedIdentifier).isEqualTo("css");
+    }
+
     private static RetrievalCandidate candidate(String id, boolean vector, boolean keyword) {
         return new RetrievalCandidate(id, UUID.randomUUID(), "doc-public", "Title", 1, "Section", "evidence", 0.9,
                 vector, keyword, false);

@@ -216,6 +216,20 @@ class EvidenceSufficiencyGateTest {
     }
 
     @Test
+    void lowercaseTechnicalNameAdjacentToChineseTextUsesExactIndexedEvidence() {
+        RankedChunk css = new RankedChunk("css", UUID.randomUUID(), "equant-choices-manual", "Manual", 1,
+                "截面函数：EM_CSS", "截面函数：css （需授权）\n\nEQErr css(const char* codes, ...);",
+                0.01, 0.2, 0.0, true, 0.0, "css");
+
+        EvidenceSufficiencyGate.Decision decision = gate.evaluate(
+                "css函数", List.of(css), Set.of(), Set.of("PUBLIC"));
+
+        assertThat(decision.sufficient()).isTrue();
+        assertThat(decision.reason()).isEqualTo("EXACT_IDENTIFIER_MATCH");
+        assertThat(decision.chunks()).containsExactly(css);
+    }
+
+    @Test
     void namedChineseErrorCodeDoesNotTriggerUnmatchedIdentifierAbstention() {
         RankedChunk code = new RankedChunk("gateway", UUID.randomUUID(), "doc-engineering-error-codes", "Errors", 1,
                 "GW-204", "GW-204 错误代码 means what?", 0.01, 0.2, 0.0, true, 0.0);

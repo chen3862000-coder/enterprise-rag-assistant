@@ -169,7 +169,8 @@ public class HybridRetrievalRepository {
                 .param("identifier", identifier).param("roles", roles).param("depth", depth)
                 .query((rs, row) -> candidate(rs.getString("id"), rs.getObject("version_id", UUID.class),
                         rs.getString("document_id"), rs.getString("title"), rs.getInt("version_number"),
-                        rs.getString("heading_path"), rs.getString("chunk_text"), rs.getDouble("rank"), false, false, true, 0.0))
+                        rs.getString("heading_path"), rs.getString("chunk_text"), rs.getDouble("rank"), false, false, true,
+                        0.0, identifier))
                 .list();
     }
 
@@ -189,8 +190,16 @@ public class HybridRetrievalRepository {
                                                 int version, String section, String text, double score,
                                                 boolean vectorMatch, boolean keywordMatch, boolean exactMatch,
                                                 double lexicalCoverage) {
+        return candidate(chunkId, versionId, documentId, title, version, section, text, score,
+                vectorMatch, keywordMatch, exactMatch, lexicalCoverage, null);
+    }
+
+    private static RetrievalCandidate candidate(String chunkId, UUID versionId, String documentId, String title,
+                                                int version, String section, String text, double score,
+                                                boolean vectorMatch, boolean keywordMatch, boolean exactMatch,
+                                                double lexicalCoverage, String matchedIdentifier) {
         return new RetrievalCandidate(chunkId, versionId, documentId, title, version, section, text, score,
-                vectorMatch, keywordMatch, exactMatch, lexicalCoverage);
+                vectorMatch, keywordMatch, exactMatch, lexicalCoverage, matchedIdentifier);
     }
 
     private static String vectorLiteral(float[] embedding) {

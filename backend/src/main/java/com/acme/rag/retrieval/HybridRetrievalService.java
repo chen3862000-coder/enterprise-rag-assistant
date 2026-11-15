@@ -146,7 +146,7 @@ public class HybridRetrievalService {
                 best.put(candidate.chunkId(), new RetrievalCandidate(existing.chunkId(), existing.versionId(),
                         existing.documentId(), existing.title(), existing.version(), existing.section(), existing.text(),
                         existing.score(), existing.vectorMatch(), existing.keywordMatch(), existing.exactMatch(),
-                        candidate.lexicalCoverage()));
+                        candidate.lexicalCoverage(), existing.matchedIdentifier()));
             }
         }
         return best.values().stream().sorted(java.util.Comparator.comparingDouble(RetrievalCandidate::score).reversed()
